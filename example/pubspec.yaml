@@ -1,0 +1,24 @@
+name: atelier_weather_example
+description: Minimal weather example for Atelier.
+publish_to: none
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  atelier:
+    path: ..
+  flutter:
+    sdk: flutter
+  freezed_annotation: ^3.1.0
+  http: ^1.6.0
+
+dev_dependencies:
+  build_runner: ^2.15.0
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+  freezed: ^3.2.5
+
+flutter:
+  uses-material-design: true
