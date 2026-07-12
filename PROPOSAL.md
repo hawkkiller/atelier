@@ -302,11 +302,12 @@ Task completion follows these rules:
 - `concurrent` invocations run independently;
 - a repeated `droppable` invocation returns the active invocation's `Future`
   without running its block;
-- `restartable` cancels the previous task context, whose `Future` completes
-  with `TaskCancelledException` after its block cooperatively returns;
+- `restartable` cancels the previous task context; its `Future<void>` completes
+  normally when the block cooperatively returns or throws the expected
+  `TaskCancelledException`;
 - `sequential` invocations run in call order;
 - disposing the ViewModel cancels active contexts and completes queued task
-  futures with `TaskCancelledException`;
+  `Future<void>`s normally;
 - unexpected task errors remain visible through the returned `Future`.
 
 Use cases:

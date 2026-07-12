@@ -37,6 +37,10 @@ abstract interface class TaskExecutor {
   ///
   /// State/effect writes from stale task zones are discarded automatically; call
   /// [TaskContext.ensureActive] for expensive work and non-Atelier side effects.
+  /// Expected [TaskCancelledException] errors are swallowed at the executor
+  /// boundary, so cancellation completes the returned [Future] normally.
+  /// Other errors propagate unchanged, including errors raised after
+  /// cancellation.
   Future<void> call(Future<void> Function(TaskContext task) block, {Object? key});
 
   Future<void> concurrent(
@@ -190,7 +194,7 @@ final class AtelierTaskExecutor implements TaskExecutor {
       await runWithAtelierTask(context, () => block(context));
       context.ensureActive();
     } catch (error, stackTrace) {
-      if (context.isCancelled) {
+      if (context.isCancelled && error is TaskCancelledException) {
         return;
       }
       Error.throwWithStackTrace(error, stackTrace);

@@ -8,6 +8,11 @@ Atelier is a lifecycle-first MVVM framework for Flutter. It provides:
 - Flutter lifecycle bindings with `watch`, `watchSelect`, and `listen`;
 - automatic disposal for controllers and arbitrary resources.
 
+Task APIs return `Future<void>`. Cancellation is cooperative: when a task is
+cancelled by restart or disposal, its expected `TaskCancelledException` is
+swallowed at the executor boundary and its future completes normally. Other
+errors still propagate, including errors thrown after cancellation.
+
 Dependency injection is not part of the current implementation.
 
 ## Usage
@@ -72,7 +77,8 @@ class _SearchScreenState extends State<SearchScreen>
 `createViewModel()` runs during `super.initState()`. Context lookups performed
 there must not subscribe to inherited widgets.
 
-See [PROPOSAL.md](PROPOSAL.md) for the architecture and planned DI design.
+See [ROADMAP.md](ROADMAP.md) for release priorities and [PROPOSAL.md](PROPOSAL.md)
+for the architecture and planned DI design.
 
 ## Example
 

@@ -181,6 +181,22 @@ void main() {
       await firstResult;
     });
 
+    test('restartable cancellation does not hide unrelated errors', () async {
+      final viewModel = _TestViewModel();
+      final gate = Completer<void>();
+
+      final first = viewModel.execute.restartable(key: 'search', (task) async {
+        await gate.future;
+        throw StateError('failed after cancellation');
+      });
+      final firstResult = expectLater(first, throwsStateError);
+
+      await viewModel.execute.restartable(key: 'search', (task) async {});
+      gate.complete();
+
+      await firstResult;
+    });
+
     test('stale restartable tasks cannot overwrite state', () async {
       final viewModel = _TestViewModel();
       final gate = Completer<void>();
