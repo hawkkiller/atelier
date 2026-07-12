@@ -7,6 +7,7 @@ enum TaskPolicy { concurrent, sequential, droppable, restartable }
 abstract interface class CancellationToken {
   bool get isCancelled;
 
+  /// Completes when this task is cancelled, but not when it finishes normally.
   Future<void> get cancelled;
 
   void throwIfCancelled();
@@ -23,6 +24,8 @@ abstract interface class TaskContext implements CancellationToken {
 }
 
 /// Thrown when an Atelier task is invalidated by restart or disposal.
+/// Any instance is swallowed whenever the throwing invocation's context is
+/// cancelled; the same exception from an uncancelled context is propagated.
 final class TaskCancelledException implements Exception {
   const TaskCancelledException([this.reason = 'The task was cancelled.']);
 
@@ -35,29 +38,43 @@ final class TaskCancelledException implements Exception {
 abstract interface class TaskExecutor {
   /// Runs [block] as an Atelier task.
   ///
-  /// State/effect writes from stale task zones are discarded automatically; call
-  /// [TaskContext.ensureActive] for expensive work and non-Atelier side effects.
-  /// Expected [TaskCancelledException] errors are swallowed at the executor
-  /// boundary, so cancellation completes the returned [Future] normally.
+  /// All entry points return a [Future], including when [block] throws
+  /// synchronously. Calls made after disposal complete normally without
+  /// invoking [block].
+  /// State/effect writes from stale task zones are discarded automatically.
+  /// Dart cannot preempt arbitrary work or external side effects: call
+  /// [TaskContext.ensureActive] immediately before repository, platform, or UI
+  /// side effects (and for expensive work).
+  /// Any [TaskCancelledException] thrown by a cancelled invocation is swallowed
+  /// at the executor boundary, so cancellation completes its [Future] normally.
   /// Other errors propagate unchanged, including errors raised after
   /// cancellation.
   Future<void> call(Future<void> Function(TaskContext task) block, {Object? key});
 
+  /// Runs independently. [key] is metadata only, so concurrent invocations
+  /// can coexist with each other and with an owned keyed lane.
   Future<void> concurrent(
     Future<void> Function(TaskContext task) block, {
     Object? key,
   });
 
+  /// Queues calls in order for [key]. Sequential, droppable, and restartable
+  /// invocations own a keyed lane; concurrent invocations can coexist with
+  /// any lane and keys do not affect other keys.
   Future<void> sequential(
     Future<void> Function(TaskContext task) block, {
     required Object key,
   });
 
+  /// Shares the active invocation's future for [key] and does not run a
+  /// repeated block. The lane is released after that future settles.
   Future<void> droppable(
     Future<void> Function(TaskContext task) block, {
     required Object key,
   });
 
+  /// Invalidates the previous invocation for [key]. Cancellation is
+  /// cooperative: an active block remains pending until it returns or throws.
   Future<void> restartable(
     Future<void> Function(TaskContext task) block, {
     required Object key,

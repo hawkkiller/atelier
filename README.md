@@ -11,7 +11,26 @@ Atelier is a lifecycle-first MVVM framework for Flutter. It provides:
 Task APIs return `Future<void>`. Cancellation is cooperative: when a task is
 cancelled by restart or disposal, its expected `TaskCancelledException` is
 swallowed at the executor boundary and its future completes normally. Other
-errors still propagate, including errors thrown after cancellation.
+errors still propagate, including errors thrown after cancellation. A
+`TaskCancelledException` is swallowed only when the invocation's own context is
+cancelled; an uncancelled exception remains an error. `task.cancelled` is a
+notification for cancellation and does not complete when a task finishes
+normally. Dart cannot preempt or roll back arbitrary futures or side effects.
+
+The keyed policies have distinct lane semantics. `sequential`, `droppable`,
+and `restartable` own a lane, so they cannot share an active key with another
+one of those policies; `concurrent` keys are metadata and may coexist with an
+owned lane. Different keys are independent. A repeated droppable call shares
+the active invocation's exact future and does not invoke its block. Sequential
+calls queue, while queued calls skipped by disposal and every call made after
+disposal complete normally without running.
+
+Active disposal and restart only request cooperative cancellation. A block may
+observe `task.cancelled`, call `throwIfCancelled()` or `ensureActive()`, and
+settle normally; a non-cooperative block remains pending until it returns.
+Atelier automatically suppresses stale state and effect writes. For repository,
+platform, UI, or other external side effects, cancellation cannot undo work:
+call `task.ensureActive()` immediately before the side effect.
 
 Dependency injection is not part of the current implementation.
 

@@ -283,6 +283,55 @@ void main() {
       await second;
     });
 
+    test('genuine synchronous throws are captured by every policy', () async {
+      final viewModel = _TestViewModel();
+      Future<void> syncThrow(TaskContext _) => throw StateError('sync');
+
+      final callable = viewModel.execute(syncThrow, key: 'call');
+      expect(callable, isA<Future<void>>());
+      await expectLater(callable, throwsStateError);
+
+      final concurrent = viewModel.execute.concurrent(syncThrow, key: 'c');
+      expect(concurrent, isA<Future<void>>());
+      await expectLater(concurrent, throwsStateError);
+
+      final sequential = viewModel.execute.sequential(syncThrow, key: 's');
+      expect(sequential, isA<Future<void>>());
+      await expectLater(sequential, throwsStateError);
+
+      final droppable = viewModel.execute.droppable(syncThrow, key: 'd');
+      expect(droppable, isA<Future<void>>());
+      await expectLater(droppable, throwsStateError);
+
+      final restartable = viewModel.execute.restartable(syncThrow, key: 'r');
+      expect(restartable, isA<Future<void>>());
+      await expectLater(restartable, throwsStateError);
+    });
+
+    test('synchronous failures release sequential, droppable, and restartable lanes', () async {
+      final viewModel = _TestViewModel();
+      var ran = 0;
+      await expectLater(
+        viewModel.execute.sequential(
+          key: 's',
+          (task) => throw StateError('sync'),
+        ),
+        throwsStateError,
+      );
+      await viewModel.execute.sequential(key: 's', (task) async => ran++);
+      await expectLater(
+        viewModel.execute.droppable(key: 'd', (task) => throw StateError('sync')),
+        throwsStateError,
+      );
+      await viewModel.execute.droppable(key: 'd', (task) async => ran++);
+      await expectLater(
+        viewModel.execute.restartable(key: 'r', (task) => throw StateError('sync')),
+        throwsStateError,
+      );
+      await viewModel.execute.restartable(key: 'r', (task) async => ran++);
+      expect(ran, 3);
+    });
+
     test('disposal cancels active and queued tasks', () async {
       final viewModel = _TestViewModel();
       final gate = Completer<void>();
@@ -305,24 +354,268 @@ void main() {
       await expectLater(viewModel.execute((task) async {}), completes);
     });
 
-    test('rejects policy collisions on active keys', () async {
+    test('disposal skips multiple queued sequential blocks', () async {
       final viewModel = _TestViewModel();
       final gate = Completer<void>();
-      final active = viewModel.execute.droppable(key: 'operation', (
-        task,
-      ) async {
+      var ran = 0;
+      final active = viewModel.execute.sequential(key: 'save', (task) async {
         await gate.future;
       });
-
-      expect(
-        () => viewModel.execute.restartable(key: 'operation', (task) async {}),
-        throwsStateError,
-      );
-
+      final queued = [
+        viewModel.execute.sequential(key: 'save', (task) async => ran++),
+        viewModel.execute.sequential(key: 'save', (task) async => ran++),
+        viewModel.execute.sequential(key: 'save', (task) async => ran++),
+      ];
+      viewModel.dispose();
       gate.complete();
       await active;
+      await Future.wait(queued);
+      expect(ran, 0);
+    });
+
+    test('active disposal is cooperative for every policy', () async {
+      final viewModel = _TestViewModel();
+      final gates = List.generate(4, (_) => Completer<void>());
+      final contexts = <TaskContext>[];
+      final futures = <Future<void>>[
+        viewModel.execute.concurrent((task) async {
+          contexts.add(task);
+          await gates[0].future;
+        }, key: 'c'),
+        viewModel.execute.sequential((task) async {
+          contexts.add(task);
+          await gates[1].future;
+        }, key: 's'),
+        viewModel.execute.droppable((task) async {
+          contexts.add(task);
+          await gates[2].future;
+        }, key: 'd'),
+        viewModel.execute.restartable((task) async {
+          contexts.add(task);
+          await gates[3].future;
+        }, key: 'r'),
+      ];
+      expect(contexts, hasLength(4));
+      viewModel.dispose();
+      for (final context in contexts) {
+        expect(context.isCancelled, isTrue);
+        await context.cancelled;
+      }
+      for (final gate in gates) {
+        gate.complete();
+      }
+      await Future.wait(futures);
+    });
+
+    test('noncooperative active task remains pending until released', () async {
+      final viewModel = _TestViewModel();
+      final gate = Completer<void>();
+      late TaskContext context;
+      final future = viewModel.execute.concurrent((task) async {
+        context = task;
+        await gate.future;
+      });
+      viewModel.dispose();
+      expect(context.isCancelled, isTrue);
+      var settled = false;
+      future.whenComplete(() => settled = true);
+      await context.cancelled;
+      expect(settled, isFalse);
+      gate.complete();
+      await future;
+      expect(settled, isTrue);
+    });
+
+    test('cancellation notification and cooperative cancellation settle normally', () async {
+      final viewModel = _TestViewModel();
+      final gate = Completer<void>();
+      late TaskContext context;
+      final first = viewModel.execute.restartable(key: 'r', (task) async {
+        context = task;
+        await gate.future;
+        task.throwIfCancelled();
+      });
+      final replacement = viewModel.execute.restartable(key: 'r', (task) async {});
+      await context.cancelled;
+      await replacement;
+      gate.complete();
+      await first;
+      expect(context.isCancelled, isTrue);
+    });
+
+    test('a task can await cancellation and then return normally', () async {
+      final viewModel = _TestViewModel();
+      late TaskContext context;
+      var resumed = false;
+      final first = viewModel.execute.restartable(key: 'await-cancel', (task) async {
+        context = task;
+        await task.cancelled;
+        resumed = true;
+      });
+      await viewModel.execute.restartable(key: 'await-cancel', (task) async {});
+      await context.cancelled;
+      await first;
+      expect(resumed, isTrue);
+    });
+
+    test('a separately constructed cancellation exception is swallowed after cancellation', () async {
+      final viewModel = _TestViewModel();
+      final release = Completer<void>();
+      late TaskContext context;
+      final first = viewModel.execute.restartable(key: 'separate-cancel', (task) async {
+        context = task;
+        await release.future;
+        throw const TaskCancelledException('constructed by the block');
+      });
+      await viewModel.execute.restartable(key: 'separate-cancel', (task) async {});
+      await context.cancelled;
+      release.complete();
+      await first;
+    });
+
+    test('uncancelled cancellation exception and post-disposal errors propagate', () async {
+      final viewModel = _TestViewModel();
+      await expectLater(
+        viewModel.execute.concurrent(
+          (task) async => throw const TaskCancelledException(),
+        ),
+        throwsA(isA<TaskCancelledException>()),
+      );
+      final gate = Completer<void>();
+      final future = viewModel.execute.concurrent((task) async {
+        await gate.future;
+        throw StateError('after disposal');
+      });
+      viewModel.dispose();
+      gate.complete();
+      await expectLater(future, throwsStateError);
+    });
+
+    test('all executor entry points skip blocks after disposal', () async {
+      final viewModel = _TestViewModel()..dispose();
+      var ran = 0;
+      final futures = [
+        viewModel.execute((task) async => ran++),
+        viewModel.execute.concurrent((task) async => ran++),
+        viewModel.execute.sequential(key: 's', (task) async => ran++),
+        viewModel.execute.droppable(key: 'd', (task) async => ran++),
+        viewModel.execute.restartable(key: 'r', (task) async => ran++),
+      ];
+      await Future.wait(futures);
+      expect(ran, 0);
+    });
+
+    test('lane ownership collisions cover all pairs and concurrent coexistence', () async {
+      final viewModel = _TestViewModel();
+      for (final pair in [
+        (TaskPolicy.sequential, TaskPolicy.droppable),
+        (TaskPolicy.sequential, TaskPolicy.restartable),
+        (TaskPolicy.droppable, TaskPolicy.sequential),
+        (TaskPolicy.droppable, TaskPolicy.restartable),
+        (TaskPolicy.restartable, TaskPolicy.sequential),
+        (TaskPolicy.restartable, TaskPolicy.droppable),
+      ]) {
+        final gate = Completer<void>();
+        late TaskContext ownerContext;
+        final owner = _startPolicy(
+          viewModel,
+          pair.$1,
+          'collision',
+          gate,
+          onContext: (context) => ownerContext = context,
+        );
+        expect(ownerContext.isActive, isTrue);
+        expect(ownerContext.isCancelled, isFalse);
+        var rejectedRan = false;
+        expect(
+          () => _startPolicy(viewModel, pair.$2, 'collision', gate, onRun: () => rejectedRan = true),
+          throwsStateError,
+        );
+        expect(rejectedRan, isFalse);
+        expect(ownerContext.isActive, isTrue);
+        expect(ownerContext.isCancelled, isFalse);
+        gate.complete();
+        await owner;
+      }
+
+      final ownedGate = Completer<void>();
+      final concurrentGate = Completer<void>();
+      var ownedEntered = false;
+      var concurrentEntered = false;
+      final owned = viewModel.execute.sequential(key: 'coexist', (task) async {
+        ownedEntered = true;
+        await ownedGate.future;
+      });
+      final concurrent = viewModel.execute.concurrent((task) async {
+        concurrentEntered = true;
+        await concurrentGate.future;
+      }, key: 'coexist');
+      expect(ownedEntered, isTrue);
+      expect(concurrentEntered, isTrue);
+      ownedGate.complete();
+      concurrentGate.complete();
+      await Future.wait([owned, concurrent]);
+
+      final sequentialGate = Completer<void>();
+      final droppableGate = Completer<void>();
+      var sequentialEntered = false;
+      var droppableEntered = false;
+      final distinctSequential = viewModel.execute.sequential(key: 'sequential-key', (task) async {
+        sequentialEntered = true;
+        await sequentialGate.future;
+      });
+      final distinctDroppable = viewModel.execute.droppable(key: 'droppable-key', (task) async {
+        droppableEntered = true;
+        await droppableGate.future;
+      });
+      expect(sequentialEntered, isTrue);
+      expect(droppableEntered, isTrue);
+      sequentialGate.complete();
+      droppableGate.complete();
+      await Future.wait([distinctSequential, distinctDroppable]);
+    });
+
+    test('ensureActive immediately before external callback skips stale invocation', () async {
+      final viewModel = _TestViewModel();
+      final resume = Completer<void>();
+      var callbackCount = 0;
+      final first = viewModel.execute.restartable(key: 'effect', (task) async {
+        await resume.future;
+        try {
+          task.ensureActive();
+          callbackCount++;
+        } on TaskCancelledException {
+          // The callback is deliberately after the activity check.
+        }
+      });
+      await viewModel.execute.restartable(key: 'effect', (task) async {});
+      resume.complete();
+      await first;
+      expect(callbackCount, 0);
     });
   });
+}
+
+Future<void> _startPolicy(
+  _TestViewModel viewModel,
+  TaskPolicy policy,
+  Object key,
+  Completer<void> gate, {
+  void Function()? onRun,
+  void Function(TaskContext context)? onContext,
+}) {
+  Future<void> block(TaskContext task) async {
+    onContext?.call(task);
+    onRun?.call();
+    await gate.future;
+  }
+
+  return switch (policy) {
+    TaskPolicy.concurrent => viewModel.execute.concurrent(block, key: key),
+    TaskPolicy.sequential => viewModel.execute.sequential(block, key: key),
+    TaskPolicy.droppable => viewModel.execute.droppable(block, key: key),
+    TaskPolicy.restartable => viewModel.execute.restartable(block, key: key),
+  };
 }
 
 final class _TestViewModel extends ViewModel {

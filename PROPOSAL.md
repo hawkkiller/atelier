@@ -250,25 +250,25 @@ Public API:
 
 ```dart
 abstract interface class TaskExecutor {
-  Future<T> call<T>(Future<T> Function(TaskContext task) block, {Object? key});
+  Future<void> call(Future<void> Function(TaskContext task) block, {Object? key});
 
-  Future<T> concurrent<T>(
-    Future<T> Function(TaskContext task) block, {
+  Future<void> concurrent(
+    Future<void> Function(TaskContext task) block, {
     Object? key,
   });
 
-  Future<T> sequential<T>(
-    Future<T> Function(TaskContext task) block, {
+  Future<void> sequential(
+    Future<void> Function(TaskContext task) block, {
     required Object key,
   });
 
-  Future<T> droppable<T>(
-    Future<T> Function(TaskContext task) block, {
+  Future<void> droppable(
+    Future<void> Function(TaskContext task) block, {
     required Object key,
   });
 
-  Future<T> restartable<T>(
-    Future<T> Function(TaskContext task) block, {
+  Future<void> restartable(
+    Future<void> Function(TaskContext task) block, {
     required Object key,
   });
 }
@@ -276,8 +276,10 @@ abstract interface class TaskExecutor {
 
 The key identifies a task lane within a ViewModel. Non-concurrent policies only
 coordinate invocations that use the same key, so those methods require one.
-While a lane is active, a key must not be reused with another policy or result
-type.
+While a lane is active, a key must not be reused with another lane-owning
+policy (`sequential`, `droppable`, or `restartable`). Concurrent invocations may
+coexist with an owned lane because keys are metadata for that policy; all task
+methods use `Future<void>` and have no result-type collision.
 
 The executor methods map to the policies represented by:
 
@@ -346,7 +348,7 @@ execute.sequential(key: 'save', (task) async {
 
 Dart cannot cancel arbitrary `Future`s, but many operations can support cooperative cancellation.
 
-`TaskContext` should also act as a cancellation token.AtelierStateBindings
+`TaskContext` should also act as a cancellation token.
 
 Public API:
 
