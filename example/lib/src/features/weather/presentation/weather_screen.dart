@@ -1,153 +1,195 @@
-import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:atelier/atelier.dart';
 import 'package:atelier_weather_example/src/features/weather/data/repositories/open_meteo_weather_repository.dart';
-import 'package:atelier_weather_example/src/features/weather/domain/repositories/weather_repository.dart';
-import 'package:atelier_weather_example/src/features/weather/presentation/weather_search.dart';
-import 'package:atelier_weather_example/src/features/weather/presentation/weather_stage.dart';
-import 'package:atelier_weather_example/src/features/weather/presentation/weather_theme.dart';
 import 'package:atelier_weather_example/src/features/weather/presentation/weather_view_model.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:phosphoricons_flutter/phosphoricons_flutter.dart';
 
 class WeatherScreen extends StatefulWidget {
-  const WeatherScreen({super.key, this.repository});
-  final WeatherRepository? repository;
+  const WeatherScreen({super.key});
 
   @override
   State<WeatherScreen> createState() => _WeatherScreenState();
 }
 
-class _WeatherScreenState extends State<WeatherScreen>
-    with AtelierVmStateMixin<WeatherViewModel, WeatherScreen> {
-  late final cityController = textController(text: 'Warsaw');
-  late final searchFocusNode = focusNode();
-  late final WeatherRepository _repository =
-      widget.repository ??
-      disposeWith(
-        OpenMeteoWeatherRepository(),
-        (repository) => repository.close(),
-      );
+class _WeatherScreenState extends State<WeatherScreen> with AtelierVmMixin<WeatherViewModel, WeatherScreen> {
+  late final _repository = disposeWith(OpenMeteoWeatherRepository(), (value) => value.close());
 
   @override
-  WeatherViewModel createViewModel(BuildContext context) =>
-      WeatherViewModel(_repository);
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(viewModel.load(cityController.text));
-  }
-
-  void _clear() {
-    cityController.clear();
-    unawaited(viewModel.search(''));
-    searchFocusNode.requestFocus();
-    setState(() {});
-  }
-
-  void _select(String city) {
-    cityController.value = TextEditingValue(
-      text: city,
-      selection: TextSelection.collapsed(offset: city.length),
-    );
-    searchFocusNode.unfocus();
-    unawaited(viewModel.load(city));
+  WeatherViewModel createViewModel(BuildContext context) {
+    return WeatherViewModel(_repository);
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = watch(viewModel.state);
-    final search = WeatherSearch(
-      controller: cityController,
-      focusNode: searchFocusNode,
-      state: state,
-      onChanged: (value) async {
-        setState(() {});
-        await viewModel.search(value);
-        return viewModel.state.value.suggestions;
-      },
-      onSubmitted: (value) {
-        searchFocusNode.unfocus();
-        unawaited(viewModel.load(value));
-      },
-      onSelected: _select,
-      onClear: _clear,
-    );
+    final weather = watchSelect(viewModel.state, (state) => state.weather);
+
     return Scaffold(
-      body: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment(.75, -.65),
-            radius: 1.35,
-            colors: [Color(0xff243b60), WeatherColors.ink],
-          ),
-        ),
-        child: SafeArea(
-          bottom: false,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 560),
-                child: Column(
-                  key: const Key('mobile-layout'),
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const _Brand(),
-                    const SizedBox(height: 24),
-                    search,
-                    const SizedBox(height: 24),
-                    WeatherStage(
-                      state: state,
-                      onRetry: () => unawaited(
-                        viewModel.load(
-                          state.requestedCity.isEmpty
-                              ? cityController.text
-                              : state.requestedCity,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    const _Attribution(),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
+      body: Stack(
+        children: [
+          WeatherBackground(child: const SafeArea(child: SizedBox.expand())),
+          Positioned.fill(child: _WeatherContent()),
+        ],
       ),
     );
   }
 }
 
-class _Brand extends StatelessWidget {
-  const _Brand();
+class _WeatherContent extends StatelessWidget {
+  const _WeatherContent();
 
   @override
-  Widget build(BuildContext context) => const Row(
-    children: [
-      Icon(Icons.wb_twilight_outlined, color: Color(0xffffca68)),
-      SizedBox(width: 10),
-      Flexible(
-        child: Text(
-          'ATELIER / WEATHER',
-          style: TextStyle(
-            fontSize: 13,
-            letterSpacing: 2,
-            fontWeight: FontWeight.w700,
+  Widget build(BuildContext context) {
+    return SafeArea(
+      bottom: false,
+      child: Column(
+        crossAxisAlignment: .start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 16, top: 32),
+            child: Row(
+              spacing: 8,
+              children: [
+                PhosphorIcon(PhosphorIconsLight.cloudRain, size: 96, color: Colors.black),
+                Text('16°', style: GoogleFonts.inter(fontSize: 48)),
+              ],
+            ),
           ),
-        ),
+          Padding(
+            padding: const EdgeInsets.only(left: 24, right: 24, top: 148),
+            child: Text.rich(
+              TextSpan(
+                text: "It's fucking ",
+                style: TextStyle(fontSize: 72, height: 1),
+                children: [
+                  TextSpan(
+                    text: 'raining. ',
+                    style: TextStyle(
+                      foreground: Paint()
+                        ..style = PaintingStyle.stroke
+                        ..strokeWidth = 2
+                        ..strokeJoin = StrokeJoin.round,
+                    ),
+                  ),
+                  TextSpan(text: 'now.'),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(left: 24, right: 24, top: 148),
+            child: Row(
+              mainAxisAlignment: .spaceBetween,
+              children: [
+                Text('Kraków', style: GoogleFonts.inter(fontSize: 24)),
+                ClipOval(
+                  child: BackdropFilter(
+                    filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                    child: IconButton.filledTonal(
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.white.withValues(alpha: .65),
+                        shape: const CircleBorder(),
+                      ),
+                      onPressed: () {},
+                      icon: PhosphorIcon(PhosphorIconsRegular.mapPin, size: 32),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
-    ],
-  );
+    );
+  }
 }
 
-class _Attribution extends StatelessWidget {
-  const _Attribution();
+class WeatherBackground extends StatefulWidget {
+  const WeatherBackground({super.key, required this.child});
+  final Widget child;
 
   @override
-  Widget build(BuildContext context) => const Text(
-    'Weather data by Open-Meteo',
-    style: TextStyle(color: WeatherColors.muted, fontSize: 13),
-  );
+  State<WeatherBackground> createState() => _WeatherBackgroundState();
+}
+
+class _WeatherBackgroundState extends State<WeatherBackground> {
+  static const _shaderAsset = 'assets/shaders/noise.frag';
+
+  ui.FragmentProgram? _program;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadShader();
+  }
+
+  Future<void> _loadShader() async {
+    try {
+      final program = await ui.FragmentProgram.fromAsset(_shaderAsset);
+      if (!mounted) return;
+      setState(() => _program = program);
+    } catch (_) {
+      // Keep the painted gradient fallback if runtime shaders are unavailable.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    return SizedBox.expand(
+      child: CustomPaint(
+        key: const Key('weather-background-grain'),
+        painter: _NoisePainter(program: _program, devicePixelRatio: pixelRatio),
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+class _NoisePainter extends CustomPainter {
+  const _NoisePainter({required this.program, required this.devicePixelRatio});
+
+  final ui.FragmentProgram? program;
+  final double devicePixelRatio;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final bounds = Offset.zero & size;
+    canvas.drawRect(
+      bounds,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment(-2, -1),
+          end: Alignment(1.5, 1.5),
+          colors: [
+            Colors.white,
+            Color.lerp(Colors.white, Colors.blueAccent, 0.156)!,
+            Color.lerp(Colors.white, Colors.blueAccent, 0.5)!,
+            Color.lerp(Colors.white, Colors.blueAccent, 0.844)!,
+            Colors.blueAccent,
+            Color.lerp(Colors.blueAccent, Colors.white, 0.156)!,
+            Color.lerp(Colors.blueAccent, Colors.white, 0.5)!,
+            Color.lerp(Colors.blueAccent, Colors.white, 0.844)!,
+            Colors.white,
+          ],
+        ).createShader(bounds),
+    );
+
+    final program = this.program;
+    if (program == null) return;
+
+    final shader = program.fragmentShader()..setFloat(0, devicePixelRatio);
+    canvas.drawRect(
+      bounds,
+      Paint()
+        ..shader = shader
+        ..blendMode = BlendMode.softLight,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_NoisePainter oldDelegate) =>
+      oldDelegate.program != program || oldDelegate.devicePixelRatio != devicePixelRatio;
 }

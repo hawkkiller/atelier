@@ -494,7 +494,7 @@ final class _TestHost extends StatefulWidget {
   State<_TestHost> createState() => _TestHostState();
 }
 
-final class _TestHostState extends State<_TestHost> with AtelierVmStateMixin<_BindingViewModel, _TestHost> {
+final class _TestHostState extends State<_TestHost> with AtelierVmMixin<_BindingViewModel, _TestHost> {
   @override
   void initState() {
     widget.events.add('before-super');
@@ -574,7 +574,7 @@ final class _LookupHost extends StatefulWidget {
   State<_LookupHost> createState() => _LookupHostState();
 }
 
-final class _LookupHostState extends State<_LookupHost> with AtelierVmStateMixin<_BindingViewModel, _LookupHost> {
+final class _LookupHostState extends State<_LookupHost> with AtelierVmMixin<_BindingViewModel, _LookupHost> {
   @override
   void initState() {
     widget.events.add('before-super');
@@ -634,7 +634,7 @@ class _FailingVmBaseState extends State<_FailingVmWidget> {
   Widget build(BuildContext context) => const SizedBox();
 }
 
-final class _FailingVmState extends _FailingVmBaseState with AtelierVmStateMixin<_FailingViewModel, _FailingVmWidget> {
+final class _FailingVmState extends _FailingVmBaseState with AtelierVmMixin<_FailingViewModel, _FailingVmWidget> {
   @override
   _FailingViewModel createViewModel(BuildContext context) => widget.vm;
 
@@ -697,7 +697,7 @@ final class _CountingHost extends StatefulWidget {
   State<_CountingHost> createState() => _CountingHostState();
 }
 
-final class _CountingHostState extends State<_CountingHost> with AtelierVmStateMixin<_BindingViewModel, _CountingHost> {
+final class _CountingHostState extends State<_CountingHost> with AtelierVmMixin<_BindingViewModel, _CountingHost> {
   void rebuildLocally() => setState(() {});
   @override
   _BindingViewModel createViewModel(BuildContext context) {

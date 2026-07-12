@@ -11,7 +11,10 @@ dependencies:
   flutter:
     sdk: flutter
   freezed_annotation: ^3.1.0
+  google_fonts: ^8.1.0
   http: ^1.6.0
+  oklab_flutter: ^0.0.1
+  phosphoricons_flutter: ^1.0.0
 
 dev_dependencies:
   build_runner: ^2.15.0
@@ -22,3 +25,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  shaders:
+    - assets/shaders/noise.frag
