@@ -36,13 +36,14 @@ class OpenMeteoWeatherRepository implements WeatherRepository {
     cancellationToken.throwIfCancelled();
 
     final current = await _loadCurrentWeather(location, cancellationToken);
-    final condition = _conditionFor(current.weatherCode, current.isDay);
+    final condition = _conditionFor(current.weatherCode);
 
     return Weather(
       city: _placeName(location),
       temperature: current.temperature,
       description: condition.description,
-      icon: condition.icon,
+      condition: condition.condition,
+      isDay: current.isDay,
     );
   }
 
@@ -144,19 +145,46 @@ class OpenMeteoWeatherRepository implements WeatherRepository {
         : '${location.name}, ${location.country}';
   }
 
-  _WeatherCondition _conditionFor(int code, bool isDay) {
+  _WeatherConditionMapping _conditionFor(int code) {
     return switch (code) {
-      0 => _WeatherCondition('Clear sky', isDay ? '☀️' : '🌙'),
-      1 || 2 => const _WeatherCondition('Partly cloudy', '⛅'),
-      3 => const _WeatherCondition('Overcast', '☁️'),
-      45 || 48 => const _WeatherCondition('Foggy', '🌫️'),
-      >= 51 && <= 57 => const _WeatherCondition('Drizzle', '🌦️'),
-      >= 61 && <= 67 => const _WeatherCondition('Rain', '🌧️'),
-      >= 71 && <= 77 => const _WeatherCondition('Snow', '🌨️'),
-      >= 80 && <= 82 => const _WeatherCondition('Rain showers', '🌦️'),
-      85 || 86 => const _WeatherCondition('Snow showers', '🌨️'),
-      >= 95 => const _WeatherCondition('Thunderstorm', '⛈️'),
-      _ => const _WeatherCondition('Unknown conditions', '🌡️'),
+      0 => const _WeatherConditionMapping(WeatherCondition.clear, 'Clear sky'),
+      1 || 2 => const _WeatherConditionMapping(
+        WeatherCondition.partlyCloudy,
+        'Partly cloudy',
+      ),
+      3 => const _WeatherConditionMapping(
+        WeatherCondition.overcast,
+        'Overcast',
+      ),
+      45 || 48 => const _WeatherConditionMapping(WeatherCondition.fog, 'Foggy'),
+      >= 51 && <= 57 => const _WeatherConditionMapping(
+        WeatherCondition.drizzle,
+        'Drizzle',
+      ),
+      >= 61 && <= 67 => const _WeatherConditionMapping(
+        WeatherCondition.rain,
+        'Rain',
+      ),
+      >= 71 && <= 77 => const _WeatherConditionMapping(
+        WeatherCondition.snow,
+        'Snow',
+      ),
+      >= 80 && <= 82 => const _WeatherConditionMapping(
+        WeatherCondition.rainShowers,
+        'Rain showers',
+      ),
+      85 || 86 => const _WeatherConditionMapping(
+        WeatherCondition.snowShowers,
+        'Snow showers',
+      ),
+      >= 95 => const _WeatherConditionMapping(
+        WeatherCondition.thunderstorm,
+        'Thunderstorm',
+      ),
+      _ => const _WeatherConditionMapping(
+        WeatherCondition.unknown,
+        'Unknown conditions',
+      ),
     };
   }
 
@@ -166,9 +194,9 @@ class OpenMeteoWeatherRepository implements WeatherRepository {
   }
 }
 
-class _WeatherCondition {
-  const _WeatherCondition(this.description, this.icon);
+class _WeatherConditionMapping {
+  const _WeatherConditionMapping(this.condition, this.description);
 
+  final WeatherCondition condition;
   final String description;
-  final String icon;
 }

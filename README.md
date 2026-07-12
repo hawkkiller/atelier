@@ -94,7 +94,24 @@ class _SearchScreenState extends State<SearchScreen>
 ```
 
 `createViewModel()` runs during `super.initState()`. Context lookups performed
-there must not subscribe to inherited widgets.
+there must not subscribe to inherited widgets. Use a non-listening lookup:
+
+```dart
+@override
+SearchViewModel createViewModel(BuildContext context) {
+  final scope = context.getInheritedWidgetOfExactType<Scope>()!;
+  return SearchViewModel(scope.repository);
+}
+```
+
+Do not call `dependOnInheritedWidgetOfExactType` (or another listening lookup)
+from `createViewModel()`.
+
+`watch` subscriptions are identified by their build call position and source;
+repeating a `listen` call with the same effects and listener identities
+deduplicates it. Distinct listener closures are distinct subscriptions. Atelier
+disposes bindings and registered resources with the owning `State`; the
+ViewModel mixin also disposes its ViewModel.
 
 See [ROADMAP.md](ROADMAP.md) for release priorities and [PROPOSAL.md](PROPOSAL.md)
 for the architecture and planned DI design.

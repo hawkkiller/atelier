@@ -36,26 +36,26 @@ The first release should verify and document the existing implementation.
 
 ### Contracts
 
-- [ ] Add focused tests for all task policies, key collisions, synchronous
+- [x] Add focused tests for all task policies, key collisions, synchronous
   failures, and sequential progress after an invocation fails.
-- [ ] Lock down cancellation settlement for restartable replacement, active
+- [x] Lock down cancellation settlement for restartable replacement, active
   disposal, queued sequential disposal, cooperative return, expected
   `TaskCancelledException`, and unrelated errors after cancellation.
-- [ ] Document droppable future sharing, keyed lanes, calls after disposal, and
+- [x] Document droppable future sharing, keyed lanes, calls after disposal, and
   the cooperative limits of Dart cancellation.
-- [ ] Verify stale tasks cannot write state or effects, and document the required
+- [x] Verify stale tasks cannot write state or effects, and document the required
   activity check before repository, platform, or UI side effects.
 
 ### Lifecycle and bindings
 
-- [ ] Test ViewModel disposal order, idempotency, channel closure, and cleanup
+- [x] Test ViewModel disposal order, idempotency, channel closure, and cleanup
   continuation when `onDispose()` or a resource disposer throws.
-- [ ] Add widget tests for ViewModel creation/disposal exactly once, unmounting,
+- [x] Add widget tests for ViewModel creation/disposal exactly once, unmounting,
   `watch` source replacement, conditional watches, selector equality, and
   duplicate `listen` calls.
-- [ ] Document that `createViewModel()` runs during `super.initState()` and show
+- [x] Document that `createViewModel()` runs during `super.initState()` and show
   the correct non-listening inherited-widget lookup.
-- [ ] Review the weather flow for ViewModel boilerplate; change ergonomics only
+- [x] Review the weather flow for ViewModel boilerplate; change ergonomics only
   when application code is repeated and error-prone.
 
 ### Release quality

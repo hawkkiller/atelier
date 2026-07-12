@@ -587,7 +587,9 @@ Flutter `State` is disposed. `watch()` rebuilds for every emitted state,
 handles effects without rebuilding. `watch()` and `watchSelect()` are build-time
 APIs: repeated calls in the same call position reuse their subscription, and a
 changed source replaces the previous subscription. `listen()` may be called
-after `super.initState()` and each call creates one subscription.
+after `super.initState()`. Repeating the same effects and listener identities
+is deduplicated; a call with a distinct identity creates a subscription. All
+subscriptions are removed with the owning State.
 
 Basic usage:
 

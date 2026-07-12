@@ -11,42 +11,58 @@ class WeatherViewModel extends ViewModel {
 
   final WeatherRepository _repository;
   late final _state = mutableStateOf(const WeatherState());
-  late final _effects = effectsOf<WeatherEffect>();
 
   StateValue<WeatherState> get state => _state;
-  Effects<WeatherEffect> get effects => _effects;
 
   Future<void> search(String query) => execute.restartable(key: #searchWeather, (task) async {
     final normalizedQuery = query.trim();
     if (normalizedQuery.isEmpty) {
-      _state.update((state) => state.copyWith(suggestions: const []));
+      _state.update(
+        (state) => state.copyWith(suggestions: const [], searchStatus: WeatherSearchStatus.idle),
+      );
       return;
     }
 
+    _state.update((state) => state.copyWith(searchStatus: WeatherSearchStatus.loading));
+
     try {
       final suggestions = await _repository.search(normalizedQuery, cancellationToken: task);
-      _state.update((state) => state.copyWith(suggestions: suggestions));
+      _state.update(
+        (state) => state.copyWith(suggestions: suggestions, searchStatus: WeatherSearchStatus.idle),
+      );
     } on WeatherNotFoundException {
-      _state.update((state) => state.copyWith(suggestions: const []));
-    } on WeatherServiceException catch (error) {
-      _state.update((state) => state.copyWith(suggestions: const []));
-      _effects.emit(WeatherEffect.serviceFailed(error.message));
+      _state.update(
+        (state) => state.copyWith(suggestions: const [], searchStatus: WeatherSearchStatus.idle),
+      );
+    } on WeatherServiceException {
+      _state.update(
+        (state) => state.copyWith(suggestions: const [], searchStatus: WeatherSearchStatus.failed),
+      );
     }
   });
 
   Future<void> load(String city) => execute.restartable(key: #loadWeather, (task) async {
     final normalizedCity = city.trim();
-    _state.update((state) => state.copyWith(weather: null, isLoading: true));
+    if (normalizedCity.isEmpty) {
+      _state.update(
+        (state) => state.copyWith(requestedCity: '', loadStatus: WeatherLoadStatus.emptyInput),
+      );
+      return;
+    }
+    _state.update(
+      (state) =>
+          state.copyWith(requestedCity: normalizedCity, loadStatus: WeatherLoadStatus.loading),
+    );
 
     try {
       final weather = await _repository.load(normalizedCity, cancellationToken: task);
-      _state.update((state) => state.copyWith(weather: weather, isLoading: false));
+      _state.update(
+        (state) => state.copyWith(weather: weather, loadStatus: WeatherLoadStatus.ready),
+      );
     } on WeatherNotFoundException {
-      _state.update((state) => state.copyWith(weather: null, isLoading: false));
-      _effects.emit(WeatherEffect.locationNotFound(normalizedCity));
-    } on WeatherServiceException catch (error) {
-      _state.update((state) => state.copyWith(weather: null, isLoading: false));
-      _effects.emit(WeatherEffect.serviceFailed(error.message));
+      _state.update((state) => state.copyWith(loadStatus: WeatherLoadStatus.notFound));
+    } on WeatherServiceException {
+      _state.update((state) => state.copyWith(loadStatus: WeatherLoadStatus.serviceUnavailable));
     }
   });
 }
@@ -56,15 +72,12 @@ abstract class WeatherState with _$WeatherState {
   const factory WeatherState({
     @Default([]) List<String> suggestions,
     Weather? weather,
-    @Default(false) bool isLoading,
+    @Default(WeatherSearchStatus.idle) WeatherSearchStatus searchStatus,
+    @Default(WeatherLoadStatus.idle) WeatherLoadStatus loadStatus,
+    @Default('') String requestedCity,
   }) = _WeatherState;
 }
 
-@freezed
-sealed class WeatherEffect with _$WeatherEffect {
-  const factory WeatherEffect.emptyCity() = WeatherEmptyCity;
+enum WeatherSearchStatus { idle, loading, failed }
 
-  const factory WeatherEffect.locationNotFound(String city) = WeatherLocationNotFound;
-
-  const factory WeatherEffect.serviceFailed(String message) = WeatherServiceFailed;
-}
+enum WeatherLoadStatus { idle, loading, ready, emptyInput, notFound, serviceUnavailable }

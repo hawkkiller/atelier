@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:atelier/atelier.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -207,6 +209,132 @@ void main() {
 
     expect(disposed, ['resource']);
   });
+
+  testWidgets('ViewModel disposal preserves first error and continues cleanup', (tester) async {
+    final events = <String>[];
+    final effects = _SynchronousEffects();
+    final vm = _FailingViewModel(events, effects);
+    await tester.pumpWidget(_FailingVmWidget(vm, effects, events));
+    await tester.pumpWidget(const SizedBox());
+
+    expect(events, [
+      'vm',
+      'resource:b',
+      'resource:a',
+      'super',
+    ]);
+    expect(tester.takeException(), same(_errorA));
+    expect(effects.cancelledAtEmit, isTrue);
+  });
+
+  testWidgets('auto-dispose resources run in reverse order after failure', (tester) async {
+    final events = <String>[];
+    await tester.pumpWidget(_FailingAutoWidget(events));
+    await tester.pumpWidget(const SizedBox());
+    expect(events, ['resource:c', 'resource:b', 'resource:a', 'super']);
+    expect(tester.takeException(), same(_errorB));
+  });
+
+  testWidgets('ViewModel is created and disposed exactly once', (tester) async {
+    final events = <String>[];
+    final vm = _BindingViewModel(disposeCallback: () => events.add('dispose'));
+    final candidate = _BindingViewModel(
+      disposeCallback: () => events.add('candidate-dispose'),
+    );
+    final key = GlobalKey<_CountingHostState>();
+    await tester.pumpWidget(
+      _StableLifecycleScope(
+        value: 1,
+        child: _CountingHost(vm, events, key: key),
+      ),
+    );
+    key.currentState!.rebuildLocally();
+    await tester.pump();
+    await tester.pumpWidget(
+      _StableLifecycleScope(
+        value: 2,
+        child: _CountingHost(candidate, events, key: key),
+      ),
+    );
+    await tester.pumpWidget(const SizedBox());
+    expect(events.where((e) => e == 'create').length, 1);
+    expect(events.where((e) => e == 'dispose').length, 1);
+    expect(events.where((e) => e == 'candidate-dispose'), isEmpty);
+  });
+
+  testWidgets('watch replaces a source in the same slot', (tester) async {
+    final first = _SourceVm(0);
+    final second = _SourceVm(10);
+    final key = GlobalKey<_SourceHostState>();
+    await tester.pumpWidget(_SourceHost(key: key, source: first.state));
+    expect(find.text('value:0'), findsOneWidget);
+    key.currentState!.replace(second.state);
+    await tester.pump();
+    expect(find.text('value:10'), findsOneWidget);
+    expect(key.currentState!.builds, 2);
+    expect(key.currentState!.selections, 2);
+    first.setValue(1);
+    await tester.pump();
+    expect(find.text('value:10'), findsOneWidget);
+    expect(key.currentState!.builds, 2);
+    expect(key.currentState!.selections, 2);
+    first.setValue(2);
+    await tester.pump();
+    expect(find.text('value:10'), findsOneWidget);
+    expect(key.currentState!.builds, 2);
+    expect(key.currentState!.selections, 2);
+    second.setValue(11);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('value:11'), findsOneWidget);
+  });
+
+  testWidgets('watchSelect honors custom equality', (tester) async {
+    final vm = _BindingViewModel();
+    final events = <String>[];
+    await tester.pumpWidget(_CustomEqualityHost(vm, events));
+    vm.setValue(2);
+    await tester.pump();
+    await tester.pump();
+    expect(events.where((e) => e == 'build').length, 1);
+    vm.setValue(3);
+    await tester.pump();
+    await tester.pump();
+    expect(events.where((e) => e == 'build').length, 2);
+  });
+
+  testWidgets('external state and effects stop at unmount', (tester) async {
+    final vm = _BindingViewModel();
+    final events = <String>[];
+    final key = GlobalKey<_ExternalHostState>();
+    await tester.pumpWidget(_ExternalHost(key: key, vm: vm, events: events));
+    await tester.pumpWidget(_ExternalHost(key: key, vm: vm, events: events));
+    vm.setValue(1);
+    vm.emit('before');
+    await tester.pump();
+    expect(events.where((e) => e == 'effect:before').length, 3);
+    final builds = events.where((e) => e == 'build').length;
+    await tester.pumpWidget(const SizedBox());
+    vm.setValue(2);
+    vm.emit('after');
+    await tester.pump();
+    expect(events.where((e) => e == 'build').length, builds);
+    expect(events.where((e) => e == 'effect:after'), isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('non-listening inherited lookup does not rebuild stable child', (tester) async {
+    final vm = _BindingViewModel();
+    final replacement = _BindingViewModel();
+    final events = <String>[];
+    final child = _LookupHost(events: events);
+    await tester.pumpWidget(_ViewModelScope(viewModel: vm, child: child));
+    await tester.pumpWidget(
+      _ViewModelScope(viewModel: replacement, child: child),
+    );
+    expect(events.where((e) => e == 'build').length, 1);
+    expect(events.where((e) => e == 'create').length, 1);
+  });
 }
 
 final class _ConditionalWatchHost extends StatefulWidget {
@@ -248,8 +376,7 @@ final class _ToggleWatchHost extends StatefulWidget {
   State<_ToggleWatchHost> createState() => _ToggleWatchHostState();
 }
 
-final class _ToggleWatchHostState extends State<_ToggleWatchHost>
-    with AtelierAutoDisposeMixin<_ToggleWatchHost> {
+final class _ToggleWatchHostState extends State<_ToggleWatchHost> with AtelierAutoDisposeMixin<_ToggleWatchHost> {
   var useWatch = true;
 
   void disableWatch() {
@@ -273,12 +400,10 @@ final class _WatchFlagScope extends InheritedWidget {
 
   final bool useWatch;
 
-  static bool of(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<_WatchFlagScope>()!.useWatch;
+  static bool of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<_WatchFlagScope>()!.useWatch;
 
   @override
-  bool updateShouldNotify(_WatchFlagScope oldWidget) =>
-      useWatch != oldWidget.useWatch;
+  bool updateShouldNotify(_WatchFlagScope oldWidget) => useWatch != oldWidget.useWatch;
 }
 
 final class _InheritedWatchHost extends StatefulWidget {
@@ -369,8 +494,7 @@ final class _TestHost extends StatefulWidget {
   State<_TestHost> createState() => _TestHostState();
 }
 
-final class _TestHostState extends State<_TestHost>
-    with AtelierVmStateMixin<_BindingViewModel, _TestHost> {
+final class _TestHostState extends State<_TestHost> with AtelierVmStateMixin<_BindingViewModel, _TestHost> {
   @override
   void initState() {
     widget.events.add('before-super');
@@ -412,8 +536,7 @@ final class _AutoDisposeHost extends StatefulWidget {
   State<_AutoDisposeHost> createState() => _AutoDisposeHostState();
 }
 
-final class _AutoDisposeHostState extends State<_AutoDisposeHost>
-    with AtelierAutoDisposeMixin<_AutoDisposeHost> {
+final class _AutoDisposeHostState extends State<_AutoDisposeHost> with AtelierAutoDisposeMixin<_AutoDisposeHost> {
   late final TextEditingController controller = textController(
     text: 'automatic',
   );
@@ -439,8 +562,7 @@ final class _ViewModelScope extends InheritedWidget {
   final _BindingViewModel viewModel;
 
   @override
-  bool updateShouldNotify(_ViewModelScope oldWidget) =>
-      !identical(viewModel, oldWidget.viewModel);
+  bool updateShouldNotify(_ViewModelScope oldWidget) => !identical(viewModel, oldWidget.viewModel);
 }
 
 final class _LookupHost extends StatefulWidget {
@@ -452,8 +574,7 @@ final class _LookupHost extends StatefulWidget {
   State<_LookupHost> createState() => _LookupHostState();
 }
 
-final class _LookupHostState extends State<_LookupHost>
-    with AtelierVmStateMixin<_BindingViewModel, _LookupHost> {
+final class _LookupHostState extends State<_LookupHost> with AtelierVmStateMixin<_BindingViewModel, _LookupHost> {
   @override
   void initState() {
     widget.events.add('before-super');
@@ -473,6 +594,271 @@ final class _LookupHostState extends State<_LookupHost>
     return Directionality(
       textDirection: TextDirection.ltr,
       child: Text('lookup:${watch(viewModel.state)}'),
+    );
+  }
+}
+
+final _errorA = StateError('error A');
+final _errorB = StateError('error B');
+
+final class _FailingViewModel extends ViewModel {
+  _FailingViewModel(this.events, this.effects);
+  final List<String> events;
+  final _SynchronousEffects effects;
+
+  @override
+  void onDispose() {
+    events.add('vm');
+    effects.emit('too-late');
+    throw _errorA;
+  }
+}
+
+final class _FailingVmWidget extends StatefulWidget {
+  const _FailingVmWidget(this.vm, this.effects, this.events);
+  final _FailingViewModel vm;
+  final _SynchronousEffects effects;
+  final List<String> events;
+  @override
+  State<_FailingVmWidget> createState() => _FailingVmState();
+}
+
+class _FailingVmBaseState extends State<_FailingVmWidget> {
+  @override
+  void dispose() {
+    widget.events.add('super');
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox();
+}
+
+final class _FailingVmState extends _FailingVmBaseState with AtelierVmStateMixin<_FailingViewModel, _FailingVmWidget> {
+  @override
+  _FailingViewModel createViewModel(BuildContext context) => widget.vm;
+
+  @override
+  void initState() {
+    super.initState();
+    listen(widget.effects, (effect) => widget.events.add('bindings'));
+    disposeWith('a', (value) => widget.events.add('resource:$value'));
+    disposeWith('b', (value) {
+      widget.events.add('resource:$value');
+      throw _errorB;
+    });
+  }
+}
+
+final class _FailingAutoWidget extends StatefulWidget {
+  const _FailingAutoWidget(this.events);
+  final List<String> events;
+  @override
+  State<_FailingAutoWidget> createState() => _FailingAutoState();
+}
+
+class _FailingAutoBaseState extends State<_FailingAutoWidget> {
+  @override
+  void dispose() {
+    widget.events.add('super');
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox();
+}
+
+final class _FailingAutoState extends _FailingAutoBaseState with AtelierAutoDisposeMixin<_FailingAutoWidget> {
+  @override
+  void initState() {
+    super.initState();
+    disposeWith('a', (value) => widget.events.add('resource:$value'));
+    disposeWith('b', (value) {
+      widget.events.add('resource:$value');
+      throw _errorB;
+    });
+    disposeWith('c', (value) => widget.events.add('resource:$value'));
+  }
+}
+
+final class _StableLifecycleScope extends InheritedWidget {
+  const _StableLifecycleScope({required this.value, required super.child});
+  final int value;
+  static int of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<_StableLifecycleScope>()!.value;
+  @override
+  bool updateShouldNotify(_StableLifecycleScope oldWidget) => value != oldWidget.value;
+}
+
+final class _CountingHost extends StatefulWidget {
+  const _CountingHost(this.vm, this.events, {super.key});
+  final _BindingViewModel vm;
+  final List<String> events;
+  @override
+  State<_CountingHost> createState() => _CountingHostState();
+}
+
+final class _CountingHostState extends State<_CountingHost> with AtelierVmStateMixin<_BindingViewModel, _CountingHost> {
+  void rebuildLocally() => setState(() {});
+  @override
+  _BindingViewModel createViewModel(BuildContext context) {
+    widget.events.add('create');
+    return widget.vm;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _StableLifecycleScope.of(context);
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Text('${watch(viewModel.state)}'),
+    );
+  }
+}
+
+final class _SourceHost extends StatefulWidget {
+  const _SourceHost({super.key, required this.source});
+  final StateValue<int> source;
+  @override
+  State<_SourceHost> createState() => _SourceHostState();
+}
+
+final class _SourceHostState extends State<_SourceHost> with AtelierAutoDisposeMixin<_SourceHost> {
+  late StateValue<int> source = widget.source;
+  var builds = 0;
+  var selections = 0;
+  void replace(StateValue<int> next) => setState(() => source = next);
+  @override
+  Widget build(BuildContext context) {
+    builds++;
+    final value = watchSelect(source, (value) {
+      selections++;
+      return value;
+    });
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Text('value:$value'),
+    );
+  }
+}
+
+final class _SynchronousEffects extends Stream<String> implements Effects<String> {
+  _SynchronousEffects() : _controller = StreamController<String>.broadcast(sync: true);
+  final StreamController<String> _controller;
+  var cancelled = false;
+  var cancelledAtEmit = false;
+
+  void emit(String effect) {
+    cancelledAtEmit = cancelled;
+    _controller.add(effect);
+  }
+
+  @override
+  StreamSubscription<String> listen(
+    void Function(String event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    final subscription = _controller.stream.listen(
+      onData,
+      onError: onError,
+      onDone: onDone,
+      cancelOnError: cancelOnError,
+    );
+    return _TrackingSubscription(subscription, () => cancelled = true);
+  }
+}
+
+final class _TrackingSubscription implements StreamSubscription<String> {
+  _TrackingSubscription(this._delegate, this._onCancel);
+  final StreamSubscription<String> _delegate;
+  final void Function() _onCancel;
+
+  @override
+  bool get isPaused => _delegate.isPaused;
+
+  @override
+  Future<void> cancel() {
+    _onCancel();
+    return _delegate.cancel();
+  }
+
+  @override
+  void onData(void Function(String data)? handleData) => _delegate.onData(handleData);
+  @override
+  void onError(Function? handleError) => _delegate.onError(handleError);
+  @override
+  void onDone(void Function()? handleDone) => _delegate.onDone(handleDone);
+  @override
+  void pause([Future<void>? resumeSignal]) => _delegate.pause(resumeSignal);
+  @override
+  void resume() => _delegate.resume();
+  @override
+  Future<E> asFuture<E>([E? futureValue]) => _delegate.asFuture(futureValue);
+}
+
+final class _SourceVm extends ViewModel {
+  _SourceVm(int initial) : _initial = initial;
+  final int _initial;
+  late final MutableState<int> _state = mutableStateOf(_initial);
+  StateValue<int> get state => _state;
+  void setValue(int value) => _state.value = value;
+}
+
+final class _CustomEqualityHost extends StatefulWidget {
+  const _CustomEqualityHost(this.vm, this.events);
+  final _BindingViewModel vm;
+  final List<String> events;
+  @override
+  State<_CustomEqualityHost> createState() => _CustomEqualityHostState();
+}
+
+final class _CustomEqualityHostState extends State<_CustomEqualityHost>
+    with AtelierAutoDisposeMixin<_CustomEqualityHost> {
+  @override
+  Widget build(BuildContext context) {
+    widget.events.add('build');
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Text(
+        '${watchSelect(widget.vm.state, (value) => value, equals: (a, b) => a % 2 == b % 2)}',
+      ),
+    );
+  }
+}
+
+final class _ExternalHost extends StatefulWidget {
+  const _ExternalHost({super.key, required this.vm, required this.events});
+  final _BindingViewModel vm;
+  final List<String> events;
+  @override
+  State<_ExternalHost> createState() => _ExternalHostState();
+}
+
+final class _ExternalHostState extends State<_ExternalHost> with AtelierAutoDisposeMixin<_ExternalHost> {
+  late final void Function(String) _stable = _record;
+  void _record(String effect) => widget.events.add('effect:$effect');
+
+  @override
+  void initState() {
+    super.initState();
+    listen(widget.vm.effects, _stable);
+  }
+
+  @override
+  void didUpdateWidget(covariant _ExternalHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    listen(widget.vm.effects, _stable);
+    listen(widget.vm.effects, (effect) => widget.events.add('effect:$effect'));
+    listen(widget.vm.effects, (effect) => widget.events.add('effect:$effect'));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    widget.events.add('build');
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Text('${watch(widget.vm.state)}'),
     );
   }
 }

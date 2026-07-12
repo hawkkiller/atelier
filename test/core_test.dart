@@ -105,6 +105,61 @@ void main() {
         throwsA(isA<MutableStateDisposedError>()),
       );
     });
+
+    test('cancels tasks before onDispose and closes channels afterward', () async {
+      final viewModel = _LifecycleViewModel();
+      final stateDone = Completer<void>();
+      final effectsDone = Completer<void>();
+      viewModel.state.listen((_) {}, onDone: stateDone.complete);
+      viewModel.effects.listen((_) {}, onDone: effectsDone.complete);
+      final taskGate = Completer<void>();
+      late TaskContext taskContext;
+      final task = viewModel.execute.concurrent((context) async {
+        taskContext = context;
+        viewModel.taskContext = context;
+        await taskGate.future;
+      });
+
+      viewModel.dispose();
+
+      expect(taskContext.isCancelled, isTrue);
+      expect(viewModel.sawCancelledTask, isTrue);
+      expect(viewModel.channelsUsableDuringDispose, isTrue);
+      taskGate.complete();
+      await task;
+      await Future.wait([stateDone.future, effectsDone.future]);
+      expect(
+        () => viewModel.setValue(2),
+        throwsA(isA<MutableStateDisposedError>()),
+      );
+      expect(
+        () => viewModel.emit('after'),
+        throwsA(isA<EffectsDisposedError>()),
+      );
+    });
+
+    test('channels close and a failed disposal remains idempotent', () async {
+      final viewModel = _LifecycleViewModel(throwOnDispose: true);
+      final stateDone = Completer<void>();
+      final effectsDone = Completer<void>();
+      viewModel.state.listen((_) {}, onDone: stateDone.complete);
+      viewModel.effects.listen((_) {}, onDone: effectsDone.complete);
+
+      expect(viewModel.dispose, throwsA(isA<ArgumentError>()));
+      await Future.wait([stateDone.future, effectsDone.future]);
+      expect(viewModel.channelsUsableDuringDispose, isTrue);
+      expect(
+        () => viewModel.setValue(2),
+        throwsA(isA<MutableStateDisposedError>()),
+      );
+      expect(
+        () => viewModel.emit('after'),
+        throwsA(isA<EffectsDisposedError>()),
+      );
+
+      expect(viewModel.dispose, returnsNormally);
+      expect(viewModel.disposeCount, 1);
+    });
   });
 
   group('TaskExecutor', () {
@@ -633,6 +688,36 @@ final class _TestViewModel extends ViewModel {
   @override
   void onDispose() {
     disposeCount++;
+  }
+}
+
+final class _LifecycleViewModel extends ViewModel {
+  _LifecycleViewModel({this.throwOnDispose = false});
+
+  final bool throwOnDispose;
+  late final MutableState<int> _state = mutableStateOf(0);
+  late final MutableEffects<String> _effects = effectsOf();
+  TaskContext? taskContext;
+  bool sawCancelledTask = false;
+  bool channelsUsableDuringDispose = false;
+  int disposeCount = 0;
+
+  StateValue<int> get state => _state;
+  Effects<String> get effects => _effects;
+
+  void setValue(int value) => _state.value = value;
+  void emit(String effect) => _effects.emit(effect);
+
+  @override
+  void onDispose() {
+    disposeCount++;
+    sawCancelledTask = taskContext?.isCancelled ?? false;
+    _state.value = 1;
+    _effects.emit('during');
+    channelsUsableDuringDispose = true;
+    if (throwOnDispose) {
+      throw ArgumentError('dispose failed');
+    }
   }
 }
 

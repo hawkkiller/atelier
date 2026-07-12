@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:atelier/atelier.dart';
 import 'package:atelier_weather_example/src/features/weather/data/repositories/open_meteo_weather_repository.dart';
+import 'package:atelier_weather_example/src/features/weather/domain/entities/weather.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -82,8 +83,35 @@ void main() {
     expect(weather.city, 'Warsaw, Poland');
     expect(weather.temperature, 22.4);
     expect(weather.description, 'Partly cloudy');
-    expect(weather.icon, '⛅');
+    expect(weather.condition, WeatherCondition.partlyCloudy);
+    expect(weather.isDay, isTrue);
 
+    repository.close();
+  });
+
+  test('maps clear night without an emoji presentation dependency', () async {
+    final client = MockClient((request) async {
+      if (request.url.host == 'geocoding-api.open-meteo.com') {
+        return http.Response(
+          '{"results":[{"name":"Reykjavik","country":"Iceland","latitude":64.1,"longitude":-21.9}]}',
+          200,
+        );
+      }
+      return http.Response(
+        '{"current":{"temperature_2m":4,"weather_code":0,"is_day":0}}',
+        200,
+      );
+    });
+    final repository = OpenMeteoWeatherRepository(client: client);
+
+    final weather = await repository.load(
+      'Reykjavik',
+      cancellationToken: _NeverCancelledToken(),
+    );
+
+    expect(weather.condition, WeatherCondition.clear);
+    expect(weather.description, 'Clear sky');
+    expect(weather.isDay, isFalse);
     repository.close();
   });
 }

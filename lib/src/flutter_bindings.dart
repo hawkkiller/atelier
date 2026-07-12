@@ -26,15 +26,15 @@ abstract interface class AtelierStateBindings {
   /// Listens for effects without rebuilding.
   ///
   /// Call this from [State.initState] or another lifecycle method, not from
-  /// [State.build].
+  /// [State.build]. Repeating the same [effects]/[listener] identity is a
+  /// no-op; a different identity creates a separate subscription.
   ///
   /// The subscription is cancelled automatically during [State.dispose].
   void listen<E>(Effects<E> effects, void Function(E effect) listener);
 }
 
 /// Adds state/effect bindings and automatic resource disposal to a [State].
-mixin AtelierAutoDisposeMixin<W extends StatefulWidget> on State<W>
-    implements AtelierStateBindings {
+mixin AtelierAutoDisposeMixin<W extends StatefulWidget> on State<W> implements AtelierStateBindings {
   late final _AtelierStateLifecycle _atelierLifecycle = _AtelierStateLifecycle(
     isMounted: () => mounted,
     rebuild: () => setState(() {}),
@@ -134,10 +134,11 @@ mixin AtelierAutoDisposeMixin<W extends StatefulWidget> on State<W>
 /// Owns one [ViewModel] for the lifetime of a Flutter [State].
 ///
 /// The ViewModel is created while `super.initState()` is executing, before
-/// control returns to the application's `initState()` implementation.
-mixin AtelierVmStateMixin<VM extends ViewModel, W extends StatefulWidget>
-    on State<W>
-    implements AtelierStateBindings {
+/// control returns to the application's `initState()` implementation. Because
+/// this is still initialization, [createViewModel] must use non-listening
+/// context lookups such as [BuildContext.getInheritedWidgetOfExactType], not
+/// `dependOnInheritedWidgetOfExactType`.
+mixin AtelierVmStateMixin<VM extends ViewModel, W extends StatefulWidget> on State<W> implements AtelierStateBindings {
   late final _atelierLifecycle = _AtelierStateLifecycle(
     isMounted: () => mounted,
     rebuild: () => setState(() {}),
@@ -321,8 +322,7 @@ final class _AtelierStateLifecycle {
     final index = _watchCursor++;
     final selected = select(state.value);
 
-    if (index < _watchSlots.length &&
-        identical(_watchSlots[index].source, state)) {
+    if (index < _watchSlots.length && identical(_watchSlots[index].source, state)) {
       final slot = _watchSlots[index];
       slot.select = (value) => select(value as T);
       slot.equals = (previous, next) => equals(previous as R, next as R);
@@ -393,8 +393,7 @@ final class _AtelierStateLifecycle {
   void listen<E>(Effects<E> effects, void Function(E effect) listener) {
     _ensureBindingsActive();
     for (final entry in _effectSubscriptions) {
-      if (identical(entry.effects, effects) &&
-          identical(entry.listener, listener)) {
+      if (identical(entry.effects, effects) && identical(entry.listener, listener)) {
         return;
       }
     }
@@ -502,6 +501,9 @@ final class _WatchSlot {
   late final StreamSubscription<dynamic> subscription;
 
   void accept(Object? value) {
+    if (!active) {
+      return;
+    }
     final next = select(value);
     if (equals(selected, next)) {
       return;
@@ -510,7 +512,12 @@ final class _WatchSlot {
     onChanged();
   }
 
-  Future<void> cancel() => subscription.cancel();
+  bool active = true;
+
+  Future<void> cancel() {
+    active = false;
+    return subscription.cancel();
+  }
 }
 
 final class _EffectSubscription {

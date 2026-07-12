@@ -3,11 +3,27 @@ class Weather {
     required this.city,
     required this.temperature,
     required this.description,
-    required this.icon,
+    required this.condition,
+    required this.isDay,
   });
 
   final String city;
   final double temperature;
   final String description;
-  final String icon;
+  final WeatherCondition condition;
+  final bool isDay;
+}
+
+enum WeatherCondition {
+  clear,
+  partlyCloudy,
+  overcast,
+  fog,
+  drizzle,
+  rain,
+  snow,
+  rainShowers,
+  snowShowers,
+  thunderstorm,
+  unknown,
 }
