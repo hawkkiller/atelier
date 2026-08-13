@@ -60,14 +60,14 @@ The first release should verify and document the existing implementation.
 
 ### Release quality
 
-- [ ] Cover loading, empty, success, API error, retry, and rapid-query
+- [x] Cover loading, empty, success, API error, retry, and rapid-query
   cancellation in the weather example without stale updates or uncaught errors.
-- [ ] Keep weather repository and ViewModel tests deterministic; the default test
+- [x] Keep weather repository and ViewModel tests deterministic; the default test
   suite must not require live network access.
-- [ ] Add CI that formats, analyzes, and tests the package and example.
-- [ ] Complete package metadata and publish exclusions; resolve warnings from
+- [x] Add CI that formats, analyzes, and tests the package and example.
+- [x] Complete package metadata and publish exclusions; resolve warnings from
   `flutter pub publish --dry-run`.
-- [ ] Audit public exports and dartdoc so every exported symbol is intentional,
+- [x] Audit public exports and dartdoc so every exported symbol is intentional,
   documented, and covered by an example or contract test.
 
 ## After 0.0.1

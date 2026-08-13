@@ -9,8 +9,7 @@ import 'package:atelier_weather_example/src/features/weather/domain/weather_erro
 import 'package:http/http.dart' as http;
 
 class OpenMeteoWeatherRepository implements WeatherRepository {
-  OpenMeteoWeatherRepository({http.Client? client})
-    : _client = client ?? http.Client();
+  OpenMeteoWeatherRepository({http.Client? client}) : _client = client ?? http.Client();
 
   final http.Client _client;
 
@@ -140,9 +139,7 @@ class OpenMeteoWeatherRepository implements WeatherRepository {
   }
 
   String _placeName(GeocodingResultDto location) {
-    return location.country.isEmpty
-        ? location.name
-        : '${location.name}, ${location.country}';
+    return location.country.isEmpty ? location.name : '${location.name}, ${location.country}';
   }
 
   _WeatherConditionMapping _conditionFor(int code) {

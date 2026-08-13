@@ -1,0 +1,9 @@
+.dart_tool/
+.github/
+.idea/
+.slim/
+build/
+coverage/
+doc/
+.ignore
+*.iml

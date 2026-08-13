@@ -14,12 +14,10 @@ abstract interface class MutableEffects<E> implements Effects<E> {
 }
 
 final class EffectsDisposedError extends StateError {
-  EffectsDisposedError()
-    : super('Cannot emit an effect after its ViewModel has been disposed.');
+  EffectsDisposedError() : super('Cannot emit an effect after its ViewModel has been disposed.');
 }
 
-final class AtelierMutableEffects<E> extends Stream<E>
-    implements MutableEffects<E> {
+final class AtelierMutableEffects<E> extends Stream<E> implements MutableEffects<E> {
   AtelierMutableEffects() : _controller = StreamController<E>.broadcast();
 
   final StreamController<E> _controller;

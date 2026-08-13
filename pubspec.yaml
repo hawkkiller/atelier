@@ -1,7 +1,8 @@
 name: atelier
 description: Lifecycle-first MVVM, structured tasks, and state bindings for Flutter.
 version: 0.0.1
-homepage:
+repository: https://github.com/hawkkiller/atelier
+issue_tracker: https://github.com/hawkkiller/atelier/issues
 
 environment:
   sdk: ">=3.10.0 <4.0.0"
