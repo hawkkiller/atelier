@@ -13,7 +13,7 @@ abstract interface class CancellationToken {
   void throwIfCancelled();
 }
 
-abstract interface class TaskContext implements CancellationToken {
+abstract interface class TaskContext<S extends Object> implements CancellationToken {
   bool get isActive;
 
   Object? get key;
@@ -21,6 +21,15 @@ abstract interface class TaskContext implements CancellationToken {
   TaskPolicy get policy;
 
   void ensureActive();
+
+  /// Applies a synchronous reducer to the latest committed state.
+  ///
+  /// The new state is published before this method returns, and equal values
+  /// are emitted. Reducers must be pure and non-reentrant: nested updates,
+  /// starting a task on the owning ViewModel, or disposing it throw
+  /// [StateError]. Reducer errors propagate through the task's [Future].
+  /// Stale contexts are silent no-ops and their reducers are not evaluated.
+  void updateState(S Function(S current) reducer);
 }
 
 /// Thrown when an Atelier task is invalidated by restart or disposal.
@@ -35,26 +44,27 @@ final class TaskCancelledException implements Exception {
   String toString() => 'TaskCancelledException: $reason';
 }
 
-abstract interface class TaskExecutor {
+abstract interface class TaskExecutor<S extends Object> {
   /// Runs [block] as an Atelier task.
   ///
   /// All entry points return a [Future], including when [block] throws
   /// synchronously. Calls made after disposal complete normally without
   /// invoking [block].
-  /// State/effect writes from stale task zones are discarded automatically.
+  /// Canonical state writes use [TaskContext.updateState]. Effects retain
+  /// Zone-based stale-write suppression.
   /// Dart cannot preempt arbitrary work or external side effects: call
-  /// [TaskContext.ensureActive] immediately before repository, platform, or UI
+  /// [TaskContext<S>.ensureActive] immediately before repository, platform, or UI
   /// side effects (and for expensive work).
   /// Any [TaskCancelledException] thrown by a cancelled invocation is swallowed
   /// at the executor boundary, so cancellation completes its [Future] normally.
   /// Other errors propagate unchanged, including errors raised after
   /// cancellation.
-  Future<void> call(Future<void> Function(TaskContext task) block, {Object? key});
+  Future<void> call(Future<void> Function(TaskContext<S> task) block, {Object? key});
 
   /// Runs independently. [key] is metadata only, so concurrent invocations
   /// can coexist with each other and with an owned keyed lane.
   Future<void> concurrent(
-    Future<void> Function(TaskContext task) block, {
+    Future<void> Function(TaskContext<S> task) block, {
     Object? key,
   });
 
@@ -62,53 +72,62 @@ abstract interface class TaskExecutor {
   /// invocations own a keyed lane; concurrent invocations can coexist with
   /// any lane and keys do not affect other keys.
   Future<void> sequential(
-    Future<void> Function(TaskContext task) block, {
+    Future<void> Function(TaskContext<S> task) block, {
     required Object key,
   });
 
   /// Shares the active invocation's future for [key] and does not run a
   /// repeated block. The lane is released after that future settles.
   Future<void> droppable(
-    Future<void> Function(TaskContext task) block, {
+    Future<void> Function(TaskContext<S> task) block, {
     required Object key,
   });
 
   /// Invalidates the previous invocation for [key]. Cancellation is
   /// cooperative: an active block remains pending until it returns or throws.
   Future<void> restartable(
-    Future<void> Function(TaskContext task) block, {
+    Future<void> Function(TaskContext<S> task) block, {
     required Object key,
   });
 }
 
-final class AtelierTaskExecutor implements TaskExecutor {
+final class AtelierTaskExecutor<S extends Object> implements TaskExecutor<S> {
+  AtelierTaskExecutor({
+    required void Function(TaskContext<S>, S Function(S)) updateState,
+    required void Function() checkAllowed,
+  }) : _updateState = updateState,
+       _checkAllowed = checkAllowed;
+  final void Function(TaskContext<S>, S Function(S)) _updateState;
+  final void Function() _checkAllowed;
   bool _isDisposed = false;
-  final Set<_TaskContext> _activeContexts = {};
-  final Map<Object, _TaskLane> _lanes = {};
+  final Set<_TaskContext<S>> _activeContexts = {};
+  final Map<Object, _TaskLane<S>> _lanes = {};
 
   @override
-  Future<void> call(Future<void> Function(TaskContext task) block, {Object? key}) {
+  Future<void> call(Future<void> Function(TaskContext<S> task) block, {Object? key}) {
     return concurrent(block, key: key);
   }
 
   @override
   Future<void> concurrent(
-    Future<void> Function(TaskContext task) block, {
+    Future<void> Function(TaskContext<S> task) block, {
     Object? key,
   }) {
+    _checkAllowed();
     if (_isDisposed) {
       return _disposedFuture();
     }
 
-    final context = _TaskContext(key: key, policy: TaskPolicy.concurrent);
+    final context = _TaskContext<S>(key: key, policy: TaskPolicy.concurrent, update: _updateState);
     return _run(context, block);
   }
 
   @override
   Future<void> droppable(
-    Future<void> Function(TaskContext task) block, {
+    Future<void> Function(TaskContext<S> task) block, {
     required Object key,
   }) {
+    _checkAllowed();
     if (_isDisposed) {
       return _disposedFuture();
     }
@@ -119,9 +138,9 @@ final class AtelierTaskExecutor implements TaskExecutor {
       return existing.activeFuture!;
     }
 
-    final lane = _TaskLane(TaskPolicy.droppable);
+    final lane = _TaskLane<S>(TaskPolicy.droppable);
     _lanes[key] = lane;
-    final context = _TaskContext(key: key, policy: TaskPolicy.droppable);
+    final context = _TaskContext<S>(key: key, policy: TaskPolicy.droppable, update: _updateState);
     final future = _run(context, block);
     lane.activeFuture = future;
     unawaited(
@@ -138,9 +157,10 @@ final class AtelierTaskExecutor implements TaskExecutor {
 
   @override
   Future<void> restartable(
-    Future<void> Function(TaskContext task) block, {
+    Future<void> Function(TaskContext<S> task) block, {
     required Object key,
   }) {
+    _checkAllowed();
     if (_isDisposed) {
       return _disposedFuture();
     }
@@ -155,9 +175,9 @@ final class AtelierTaskExecutor implements TaskExecutor {
       );
     }
 
-    final lane = existing ?? _TaskLane(TaskPolicy.restartable);
+    final lane = existing ?? _TaskLane<S>(TaskPolicy.restartable);
     _lanes[key] = lane;
-    final context = _TaskContext(key: key, policy: TaskPolicy.restartable);
+    final context = _TaskContext<S>(key: key, policy: TaskPolicy.restartable, update: _updateState);
     final future = _run(context, block);
     lane
       ..activeContext = context
@@ -182,9 +202,10 @@ final class AtelierTaskExecutor implements TaskExecutor {
 
   @override
   Future<void> sequential(
-    Future<void> Function(TaskContext task) block, {
+    Future<void> Function(TaskContext<S> task) block, {
     required Object key,
   }) {
+    _checkAllowed();
     if (_isDisposed) {
       return _disposedFuture();
     }
@@ -194,7 +215,7 @@ final class AtelierTaskExecutor implements TaskExecutor {
       _requirePolicy(existing, TaskPolicy.sequential);
     }
 
-    final lane = existing ?? _TaskLane(TaskPolicy.sequential);
+    final lane = existing ?? _TaskLane<S>(TaskPolicy.sequential);
     _lanes[key] = lane;
     final invocation = _SequentialInvocation(block);
     lane.queue.add(invocation);
@@ -203,8 +224,8 @@ final class AtelierTaskExecutor implements TaskExecutor {
   }
 
   Future<void> _run(
-    _TaskContext context,
-    Future<void> Function(TaskContext task) block,
+    _TaskContext<S> context,
+    Future<void> Function(TaskContext<S> task) block,
   ) async {
     _activeContexts.add(context);
     try {
@@ -221,13 +242,13 @@ final class AtelierTaskExecutor implements TaskExecutor {
     }
   }
 
-  void _startNextSequential(Object key, _TaskLane lane) {
+  void _startNextSequential(Object key, _TaskLane<S> lane) {
     if (_isDisposed || lane.activeFuture != null || lane.queue.isEmpty) {
       return;
     }
 
     final invocation = lane.queue.removeAt(0);
-    final context = _TaskContext(key: key, policy: TaskPolicy.sequential);
+    final context = _TaskContext<S>(key: key, policy: TaskPolicy.sequential, update: _updateState);
     final future = invocation.run(this, context);
     lane
       ..activeContext = context
@@ -254,7 +275,7 @@ final class AtelierTaskExecutor implements TaskExecutor {
     );
   }
 
-  void _requirePolicy(_TaskLane lane, TaskPolicy expectedPolicy) {
+  void _requirePolicy(_TaskLane<S> lane, TaskPolicy expectedPolicy) {
     if (lane.policy != expectedPolicy) {
       throw StateError(
         'Task key is already active with ${lane.policy.name} policy.',
@@ -273,7 +294,7 @@ final class AtelierTaskExecutor implements TaskExecutor {
     const cancellation = TaskCancelledException(
       'The ViewModel has been disposed.',
     );
-    for (final context in List<_TaskContext>.of(_activeContexts)) {
+    for (final context in List<_TaskContext<S>>.of(_activeContexts)) {
       context.cancel(cancellation);
     }
     for (final lane in _lanes.values) {
@@ -286,8 +307,9 @@ final class AtelierTaskExecutor implements TaskExecutor {
   }
 }
 
-final class _TaskContext implements TaskContext, AtelierTaskZoneContext {
-  _TaskContext({required this.key, required this.policy});
+final class _TaskContext<S extends Object> implements TaskContext<S>, AtelierTaskZoneContext {
+  _TaskContext({required this.key, required this.policy, required this.update});
+  final void Function(TaskContext<S>, S Function(S)) update;
 
   @override
   final Object? key;
@@ -327,6 +349,11 @@ final class _TaskContext implements TaskContext, AtelierTaskZoneContext {
     }
   }
 
+  @override
+  void updateState(S Function(S current) reducer) {
+    if (isActive) update(this, reducer);
+  }
+
   void cancel(TaskCancelledException exception) {
     if (_isFinished || isCancelled) {
       return;
@@ -340,22 +367,22 @@ final class _TaskContext implements TaskContext, AtelierTaskZoneContext {
   }
 }
 
-final class _TaskLane {
+final class _TaskLane<S extends Object> {
   _TaskLane(this.policy);
 
   final TaskPolicy policy;
-  final List<_SequentialInvocation> queue = [];
-  _TaskContext? activeContext;
+  final List<_SequentialInvocation<S>> queue = [];
+  _TaskContext<S>? activeContext;
   Future<void>? activeFuture;
 }
 
-final class _SequentialInvocation {
+final class _SequentialInvocation<S extends Object> {
   _SequentialInvocation(this.block);
 
-  final Future<void> Function(TaskContext task) block;
+  final Future<void> Function(TaskContext<S> task) block;
   final Completer<void> completer = Completer<void>();
 
-  Future<void> run(AtelierTaskExecutor executor, _TaskContext context) {
+  Future<void> run(AtelierTaskExecutor<S> executor, _TaskContext<S> context) {
     final future = executor._run(context, block);
     unawaited(
       future.then<void>(

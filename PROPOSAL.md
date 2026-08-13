@@ -50,18 +50,18 @@ internal to the framework.
 
 ### 1. ViewModel
 
-A ViewModel owns lifecycle-aware tasks and resources. It may expose one, many,
-or no observable state values.
+A ViewModel owns one aggregate state value, lifecycle-aware tasks, effects, and
+resources.
 
 Public API:
 
 ```dart
-abstract class ViewModel {
-  TaskExecutor get execute;
-  bool get isDisposed;
+abstract class ViewModel<S extends Object> {
+  ViewModel(S initialState);
 
-  @protected
-  MutableState<T> mutableStateOf<T>(T initialValue);
+  StateValue<S> get state;
+  TaskExecutor<S> get execute;
+  bool get isDisposed;
 
   @protected
   MutableEffects<E> effectsOf<E>();
@@ -74,8 +74,8 @@ abstract class ViewModel {
 }
 ```
 
-`mutableStateOf()` and `effectsOf()` register their result with the ViewModel
-lifecycle. `dispose()` is public so the owning Atelier lifecycle integration can
+`effectsOf()` registers its result with the ViewModel lifecycle. `dispose()` is
+public so the owning Atelier lifecycle integration can
 call it, but it is non-overridable and idempotent. Custom cleanup belongs in
 `onDispose()`. Disposal first cancels active and queued tasks, then invokes
 `onDispose()`, and finally closes owned state and effect channels. An exception
@@ -84,18 +84,15 @@ from `onDispose()` does not prevent owned channels from being closed.
 Usage:
 
 ```dart
-class SearchViewModel extends ViewModel {
-  SearchViewModel(this.searchRepository);
+class SearchViewModel extends ViewModel<SearchState> {
+  SearchViewModel(this.searchRepository) : super(SearchState.initial());
 
   final SearchRepository searchRepository;
-  late final _state = mutableStateOf(SearchState.initial());
-
-  StateValue<SearchState> get state => _state;
 
   Future<void> search(String query) => execute.restartable(
     key: 'search',
     (task) async {
-      _state.update((s) => s.copyWith(query: query, loading: true));
+      task.updateState((s) => s.copyWith(query: query, loading: true));
 
       final results = await searchRepository.search(
         query,
@@ -104,7 +101,7 @@ class SearchViewModel extends ViewModel {
 
       task.ensureActive();
 
-      _state.update((s) => s.copyWith(loading: false, results: results));
+      task.updateState((s) => s.copyWith(loading: false, results: results));
     },
   );
 }
@@ -112,17 +109,17 @@ class SearchViewModel extends ViewModel {
 
 The ViewModel provides:
 
-- lifecycle-owned mutable state and effect factories;
+- built-in read-only aggregate state and effect factories;
 - task execution;
 - cancellation token support;
 - lifecycle-aware disposal;
-- optional observable state and effect channels.
+- built-in observable state and optional effect channels.
 
 ---
 
 
 
-### 2. MutableState
+### 2. StateValue and task-owned state updates
 
 State updates should be safe when multiple async operations update the same state.
 
@@ -132,56 +129,31 @@ Public API:
 abstract interface class StateValue<S> implements Stream<S> {
   S get value;
 }
-
-abstract interface class MutableState<S> implements StateValue<S> {
-  set value(S value);
-
-  void update(S Function(S current) transform);
-}
 ```
 
-`StateValue` is the read contract consumed by UI bindings. `MutableState` adds
-mutation for ViewModels. A state value is a broadcast stream that immediately
-emits its current value to each new listener. It is closed automatically with
-its owning ViewModel. The current value and later stream notifications are
-delivered asynchronously in event order, while the `value` property itself is
-updated synchronously. Every assignment is emitted even when the new value
-compares equal to the current value. Mutation after disposal throws
-`MutableStateDisposedError`.
+`StateValue` is the read-only broadcast stream consumed by UI bindings. It
+replays its current value to new listeners, sends later notifications
+asynchronously in order, updates `value` synchronously, and emits equal values.
+It is closed with its owning ViewModel.
 
-Create private mutable state and expose only its read contract:
+State mutation is source-breaking compared with the earlier proposal: the
+`MutableState`, `MutableStateDisposedError`, and `mutableStateOf` APIs are
+removed. Use the task context instead:
 
 ```dart
-late final _state = mutableStateOf(LoginState.initial());
-
-StateValue<LoginState> get state => _state;
-```
-
-Instead of:
-
-```dart
-_state.value = _state.value.copyWith(...);
-```
-
-the framework encourages:
-
-```dart
-_state.update((s) => s.copyWith(...));
-```
-
-Example:
-
-```dart
-_state.update((s) => s.copyWith(userLoading: true));
+task.updateState((s) => s.copyWith(userLoading: true));
 
 final user = await repository.loadUser();
 
 task.ensureActive();
 
-_state.update((s) => s.copyWith(userLoading: false, user: user));
+task.updateState((s) => s.copyWith(userLoading: false, user: user));
 ```
 
-This avoids stale snapshot updates when multiple operations run concurrently.
+Reducers are synchronous and reduce against the latest committed state. Equal
+results emit, while stale contexts silently no-op without evaluating reducers.
+Reducers must be pure and non-reentrant; nested updates, starting an owning-VM
+task, or disposing the ViewModel from a reducer throws `StateError`.
 
 ---
 
@@ -249,26 +221,26 @@ The framework should provide a lifecycle-aware task API similar in spirit to `vi
 Public API:
 
 ```dart
-abstract interface class TaskExecutor {
-  Future<void> call(Future<void> Function(TaskContext task) block, {Object? key});
+abstract interface class TaskExecutor<S extends Object> {
+  Future<void> call(Future<void> Function(TaskContext<S> task) block, {Object? key});
 
   Future<void> concurrent(
-    Future<void> Function(TaskContext task) block, {
+    Future<void> Function(TaskContext<S> task) block, {
     Object? key,
   });
 
   Future<void> sequential(
-    Future<void> Function(TaskContext task) block, {
+    Future<void> Function(TaskContext<S> task) block, {
     required Object key,
   });
 
   Future<void> droppable(
-    Future<void> Function(TaskContext task) block, {
+    Future<void> Function(TaskContext<S> task) block, {
     required Object key,
   });
 
   Future<void> restartable(
-    Future<void> Function(TaskContext task) block, {
+    Future<void> Function(TaskContext<S> task) block, {
     required Object key,
   });
 }
@@ -287,7 +259,7 @@ The executor methods map to the policies represented by:
 enum TaskPolicy { concurrent, sequential, droppable, restartable }
 ```
 
-`ViewModel` exposes a callable `execute` property of type `TaskExecutor`. Calling
+`ViewModel<S>` exposes a callable `execute` property of type `TaskExecutor<S>`. Calling
 `execute(...)` directly uses the concurrent policy. The other policies are
 available as discoverable methods on the same executor:
 
@@ -360,14 +332,22 @@ abstract interface class CancellationToken {
   void throwIfCancelled();
 }
 
-abstract interface class TaskContext implements CancellationToken {
+abstract interface class TaskContext<S extends Object> implements CancellationToken {
   bool get isActive;
   Object? get key;
   TaskPolicy get policy;
 
   void ensureActive();
+  void updateState(S Function(S current) reducer);
 }
 ```
+
+`updateState` is synchronous and always reduces against the latest committed
+state. It publishes before returning and emits equal values. Reducers must be
+pure and non-reentrant: nested updates, starting or restarting a task on the
+owning ViewModel, or disposing it throw `StateError`; reducer errors propagate
+through the task `Future`. A stale context silently no-ops without evaluating
+its reducer. Zones are retained only for stale effect suppression.
 
 Usage:
 
@@ -376,7 +356,7 @@ final result = await api.search(query, cancellationToken: task);
 
 task.ensureActive();
 
-_state.update((s) => s.copyWith(result: result));
+task.updateState((s) => s.copyWith(result: result));
 ```
 
 For HTTP clients like Dio, adapters can be provided:
@@ -398,7 +378,7 @@ The UI should remain normal Flutter code.
 Public API:
 
 ```dart
-mixin AtelierVmStateMixin<VM extends ViewModel, W extends StatefulWidget>
+mixin AtelierVmMixin<VM extends ViewModel<Object>, W extends StatefulWidget>
     on State<W>
     implements AtelierStateBindings {
   VM createViewModel(BuildContext context);
@@ -430,7 +410,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginState extends State<LoginScreen>
-    with AtelierVmStateMixin<LoginViewModel, LoginScreen> {
+    with AtelierVmMixin<LoginViewModel, LoginScreen> {
   late final email = textController();
   late final password = textController();
 
@@ -482,7 +462,7 @@ mixin AtelierAutoDisposeMixin<W extends StatefulWidget> on State<W>
 }
 ```
 
-`AtelierVmStateMixin` exposes the same helpers without requiring both mixins in
+`AtelierVmMixin` exposes the same helpers without requiring both mixins in
 the `with` clause.
 
 ```dart
@@ -531,10 +511,10 @@ This suggests two separate mixins:
 
 ```dart
 AtelierAutoDisposeMixin
-AtelierVmStateMixin<VM, W>
+AtelierVmMixin<VM, W>
 ```
 
-`AtelierVmStateMixin` can build on top of the auto-dispose lifecycle layer.
+`AtelierVmMixin` can build on top of the auto-dispose lifecycle layer.
 
 ---
 
@@ -560,9 +540,9 @@ Atelier bindings avoid repetitive subscription and builder code when desired.
 `AtelierStateBindings` is the shared public contract for lifecycle-aware state
 and effect subscriptions in a Flutter `State`. Application code does not create
 it directly. It is implemented by `AtelierAutoDisposeMixin` and
-`AtelierVmStateMixin`, allowing both mixins to expose the same binding API.
+`AtelierVmMixin`, allowing both mixins to expose the same binding API.
 
-Public API exposed by `AtelierAutoDisposeMixin` and `AtelierVmStateMixin`:
+Public API exposed by `AtelierAutoDisposeMixin` and `AtelierVmMixin`:
 
 ```dart
 abstract interface class AtelierStateBindings {
@@ -674,8 +654,8 @@ class AuthRepository {
 
 ```dart
 @viewModel
-class LoginViewModel extends ViewModel {
-  LoginViewModel(this.authRepository);
+class LoginViewModel extends ViewModel<LoginState> {
+  LoginViewModel(this.authRepository) : super(LoginState.initial());
 
   final AuthRepository authRepository;
 }
@@ -803,7 +783,7 @@ The initial MVP should not try to implement everything.
 Recommended MVP:
 
 1. `ViewModel`;
-2. `StateValue<S>` / `MutableState<S>`;
+2. `StateValue<S>` with task-owned updates;
 3. `Effects<E>` / `MutableEffects<E>`;
 4. callable `TaskExecutor` with `TaskContext`;
 5. `execute()` / `execute.concurrent()`;
@@ -812,7 +792,7 @@ Recommended MVP:
 8. `execute.sequential()`;
 9. `AtelierStateBindings`;
 10. `AtelierAutoDisposeMixin`;
-11. `AtelierVmStateMixin`;
+11. `AtelierVmMixin`;
 12. `listen()`;
 13. `watch()`;
 14. basic generated ViewModel factories.
@@ -914,7 +894,6 @@ The unique value is the combination of:
 atelier_core
   ViewModel
   StateValue
-  MutableState
   Effects
   MutableEffects
   TaskExecutor
@@ -924,7 +903,7 @@ atelier_core
 
 atelier_flutter
   AtelierAutoDisposeMixin
-  AtelierVmStateMixin
+  AtelierVmMixin
   AtelierStateBindings
   watch
   listen
@@ -965,18 +944,15 @@ atelier_generator
 
 ```dart
 @viewModel
-class LoginViewModel extends ViewModel {
-  LoginViewModel(this.authRepository);
+class LoginViewModel extends ViewModel<LoginState> {
+  LoginViewModel(this.authRepository) : super(LoginState.initial());
 
   final AuthRepository authRepository;
-  late final _state = mutableStateOf(LoginState.initial());
-
-  StateValue<LoginState> get state => _state;
 
   Future<void> login(String email, String password) => execute.droppable(
     key: 'login',
     (task) async {
-      _state.update((s) => s.copyWith(loading: true));
+      task.updateState((s) => s.copyWith(loading: true));
 
       final user = await authRepository.login(
         email,
@@ -986,7 +962,7 @@ class LoginViewModel extends ViewModel {
 
       task.ensureActive();
 
-      _state.update((s) => s.copyWith(loading: false, user: user));
+      task.updateState((s) => s.copyWith(loading: false, user: user));
     },
   );
 }
@@ -1001,7 +977,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginState extends State<LoginScreen>
-    with AtelierVmStateMixin<LoginViewModel, LoginScreen> {
+    with AtelierVmMixin<LoginViewModel, LoginScreen> {
   late final email = textController();
   late final password = textController();
 

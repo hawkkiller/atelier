@@ -1,65 +1,31 @@
 import 'dart:async';
 
-import 'task_zone.dart';
-
-/// A read-only observable value.
+/// A read-only broadcast stream of the current value and subsequent updates.
 ///
-/// New listeners receive [value], followed by subsequent values. Stream
-/// notifications are asynchronous. Every assignment is emitted, including
-/// assignments equal to the current value.
+/// Subscribing replays the current value. Notifications are asynchronous and
+/// ordered, the stream is broadcast, and equal values are emitted.
 abstract interface class StateValue<S> implements Stream<S> {
   S get value;
 }
 
-/// The mutable side of a [StateValue].
-abstract interface class MutableState<S> implements StateValue<S> {
-  set value(S value);
-
-  /// Replaces [value] with the result of applying [transform] to its current
-  /// value.
-  void update(S Function(S current) transform);
-}
-
-final class MutableStateDisposedError extends StateError {
-  MutableStateDisposedError()
-    : super('Cannot update state after its ViewModel has been disposed.');
-}
-
-final class AtelierMutableState<S> extends Stream<S>
-    implements MutableState<S> {
+final class AtelierMutableState<S> extends Stream<S> implements StateValue<S> {
   AtelierMutableState(this._value);
-
   S _value;
   bool _isClosed = false;
   final Set<StreamController<S>> _listeners = {};
 
   @override
   bool get isBroadcast => true;
-
   @override
   S get value => _value;
+  bool get isOpen => !_isClosed;
 
-  @override
-  set value(S next) {
-    if (!atelierWritesAllowed()) {
-      return;
-    }
-    if (_isClosed) {
-      throw MutableStateDisposedError();
-    }
-
+  void setValue(S next) {
+    if (_isClosed) return;
     _value = next;
     for (final listener in List<StreamController<S>>.of(_listeners)) {
       listener.add(next);
     }
-  }
-
-  @override
-  void update(S Function(S current) transform) {
-    if (!atelierWritesAllowed()) {
-      return;
-    }
-    value = transform(_value);
   }
 
   @override
@@ -70,12 +36,7 @@ final class AtelierMutableState<S> extends Stream<S>
     bool? cancelOnError,
   }) {
     late final StreamController<S> controller;
-    controller = StreamController<S>(
-      onCancel: () {
-        _listeners.remove(controller);
-      },
-    );
-
+    controller = StreamController<S>(onCancel: () => _listeners.remove(controller));
     final subscription = controller.stream.listen(
       onData,
       onError: onError,
@@ -92,10 +53,7 @@ final class AtelierMutableState<S> extends Stream<S>
   }
 
   void close() {
-    if (_isClosed) {
-      return;
-    }
-
+    if (_isClosed) return;
     _isClosed = true;
     final listeners = List<StreamController<S>>.of(_listeners);
     _listeners.clear();

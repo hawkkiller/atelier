@@ -1,28 +1,27 @@
 import 'package:meta/meta.dart';
-
 import 'effects.dart';
 import 'state_value.dart';
 import 'task.dart';
 
-/// Owns observable values, effects, and lifecycle-aware tasks.
-abstract class ViewModel {
-  ViewModel() : _executor = AtelierTaskExecutor();
+/// Owns one aggregate state value, effects, and lifecycle-aware tasks.
+///
+/// State is initialized by [initialState] and can only be changed from a task
+/// through [TaskContext.updateState]. Reducers run synchronously and observe
+/// the latest committed value.
+abstract class ViewModel<S extends Object> {
+  ViewModel(S initialState) : _state = AtelierMutableState(initialState) {
+    _executor = AtelierTaskExecutor<S>(updateState: _commit, checkAllowed: _checkReducerGuard);
+  }
 
-  final AtelierTaskExecutor _executor;
+  final AtelierMutableState<S> _state;
+  late final AtelierTaskExecutor<S> _executor;
   final List<void Function()> _ownedResources = [];
   bool _isDisposed = false;
+  bool _inReducer = false;
 
-  TaskExecutor get execute => _executor;
-
+  StateValue<S> get state => _state;
+  TaskExecutor<S> get execute => _executor;
   bool get isDisposed => _isDisposed;
-
-  @protected
-  MutableState<T> mutableStateOf<T>(T initialValue) {
-    _ensureNotDisposed();
-    final state = AtelierMutableState<T>(initialValue);
-    _ownedResources.add(state.close);
-    return state;
-  }
 
   @protected
   MutableEffects<E> effectsOf<E>() {
@@ -32,44 +31,55 @@ abstract class ViewModel {
     return effects;
   }
 
+  void _checkReducerGuard() {
+    if (_inReducer) throw StateError('Cannot start or cancel a task from a state reducer.');
+  }
+
+  void _commit(TaskContext<S> context, S Function(S) reducer) {
+    if (_inReducer) {
+      throw StateError('Nested state updates are not allowed from a reducer.');
+    }
+    if (_isDisposed || !_state.isOpen || !context.isActive) return;
+    _inReducer = true;
+    S next;
+    try {
+      next = reducer(_state.value);
+    } finally {
+      _inReducer = false;
+    }
+    if (!_isDisposed && _state.isOpen && context.isActive) _state.setValue(next);
+  }
+
   @nonVirtual
   void dispose() {
-    if (_isDisposed) {
-      return;
-    }
+    if (_isDisposed) return;
+    if (_inReducer) throw StateError('Cannot dispose a ViewModel from a state reducer.');
     _isDisposed = true;
     _executor.dispose();
-
     Object? error;
     StackTrace? stackTrace;
     try {
       onDispose();
-    } catch (caughtError, caughtStackTrace) {
-      error = caughtError;
-      stackTrace = caughtStackTrace;
-    } finally {
-      for (final dispose in _ownedResources.reversed) {
-        try {
-          dispose();
-        } catch (caughtError, caughtStackTrace) {
-          error ??= caughtError;
-          stackTrace ??= caughtStackTrace;
-        }
+    } catch (e, s) {
+      error = e;
+      stackTrace = s;
+    }
+    _state.close();
+    for (final close in _ownedResources.reversed) {
+      try {
+        close();
+      } catch (e, s) {
+        error ??= e;
+        stackTrace ??= s;
       }
-      _ownedResources.clear();
     }
-
-    if (error != null) {
-      Error.throwWithStackTrace(error, stackTrace!);
-    }
+    _ownedResources.clear();
+    if (error != null) Error.throwWithStackTrace(error, stackTrace!);
   }
 
   @protected
   void onDispose() {}
-
   void _ensureNotDisposed() {
-    if (_isDisposed) {
-      throw StateError('The ViewModel has been disposed.');
-    }
+    if (_isDisposed) throw StateError('The ViewModel has been disposed.');
   }
 }

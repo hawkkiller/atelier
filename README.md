@@ -28,30 +28,37 @@ disposal complete normally without running.
 Active disposal and restart only request cooperative cancellation. A block may
 observe `task.cancelled`, call `throwIfCancelled()` or `ensureActive()`, and
 settle normally; a non-cooperative block remains pending until it returns.
-Atelier automatically suppresses stale state and effect writes. For repository,
-platform, UI, or other external side effects, cancellation cannot undo work:
+Atelier suppresses stale state updates and effect writes. State updates are
+explicit through the active task context. For repository, platform, UI, or
+other external side effects, cancellation cannot undo work:
 call `task.ensureActive()` immediately before the side effect.
+
+Each `ViewModel<S extends Object>` requires one initial aggregate state via
+`super(initialState)`. Its built-in `state` is a read-only `StateValue<S>`.
+Canonical mutations happen only inside an `execute` task through
+`task.updateState`: reducers are synchronous, use the latest committed state,
+and emit equal values. Stale contexts silently no-op without evaluating their
+reducers. Reducers are pure and non-reentrant; nested updates, starting a task
+on the owning ViewModel, or disposing it from a reducer throws `StateError`.
+Zones remain only for stale effect suppression.
 
 Dependency injection is not part of the current implementation.
 
 ## Usage
 
 ```dart
-class SearchViewModel extends ViewModel {
-  SearchViewModel(this.repository);
+class SearchViewModel extends ViewModel<SearchState> {
+  SearchViewModel(this.repository) : super(SearchState.initial());
 
   final SearchRepository repository;
-  late final MutableState<SearchState> _state =
-      mutableStateOf(SearchState.initial());
   late final MutableEffects<SearchEffect> _effects = effectsOf();
 
-  StateValue<SearchState> get state => _state;
   Effects<SearchEffect> get effects => _effects;
 
   Future<void> search(String query) => execute.restartable(
         key: 'search',
         (task) async {
-          _state.update((state) => state.copyWith(loading: true));
+          task.updateState((state) => state.copyWith(loading: true));
 
           final results = await repository.search(
             query,
@@ -59,7 +66,7 @@ class SearchViewModel extends ViewModel {
           );
           task.ensureActive();
 
-          _state.update(
+          task.updateState(
             (state) => state.copyWith(loading: false, results: results),
           );
         },
@@ -71,7 +78,7 @@ Own the ViewModel from a regular `StatefulWidget`:
 
 ```dart
 class _SearchScreenState extends State<SearchScreen>
-    with AtelierVmStateMixin<SearchViewModel, SearchScreen> {
+    with AtelierVmMixin<SearchViewModel, SearchScreen> {
   late final query = textController();
 
   @override

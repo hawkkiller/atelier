@@ -14,7 +14,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$WeatherState {
 
- List<String> get suggestions; Weather? get weather; WeatherSearchStatus get searchStatus; WeatherLoadStatus get loadStatus; String get requestedCity;
+ Weather? get weather; WeatherLoadStatus get loadStatus; String get requestedCity;
 /// Create a copy of WeatherState
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -25,16 +25,16 @@ $WeatherStateCopyWith<WeatherState> get copyWith => _$WeatherStateCopyWithImpl<W
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is WeatherState&&const DeepCollectionEquality().equals(other.suggestions, suggestions)&&(identical(other.weather, weather) || other.weather == weather)&&(identical(other.searchStatus, searchStatus) || other.searchStatus == searchStatus)&&(identical(other.loadStatus, loadStatus) || other.loadStatus == loadStatus)&&(identical(other.requestedCity, requestedCity) || other.requestedCity == requestedCity));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is WeatherState&&(identical(other.weather, weather) || other.weather == weather)&&(identical(other.loadStatus, loadStatus) || other.loadStatus == loadStatus)&&(identical(other.requestedCity, requestedCity) || other.requestedCity == requestedCity));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(suggestions),weather,searchStatus,loadStatus,requestedCity);
+int get hashCode => Object.hash(runtimeType,weather,loadStatus,requestedCity);
 
 @override
 String toString() {
-  return 'WeatherState(suggestions: $suggestions, weather: $weather, searchStatus: $searchStatus, loadStatus: $loadStatus, requestedCity: $requestedCity)';
+  return 'WeatherState(weather: $weather, loadStatus: $loadStatus, requestedCity: $requestedCity)';
 }
 
 
@@ -45,7 +45,7 @@ abstract mixin class $WeatherStateCopyWith<$Res>  {
   factory $WeatherStateCopyWith(WeatherState value, $Res Function(WeatherState) _then) = _$WeatherStateCopyWithImpl;
 @useResult
 $Res call({
- List<String> suggestions, Weather? weather, WeatherSearchStatus searchStatus, WeatherLoadStatus loadStatus, String requestedCity
+ Weather? weather, WeatherLoadStatus loadStatus, String requestedCity
 });
 
 
@@ -62,12 +62,10 @@ class _$WeatherStateCopyWithImpl<$Res>
 
 /// Create a copy of WeatherState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? suggestions = null,Object? weather = freezed,Object? searchStatus = null,Object? loadStatus = null,Object? requestedCity = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? weather = freezed,Object? loadStatus = null,Object? requestedCity = null,}) {
   return _then(_self.copyWith(
-suggestions: null == suggestions ? _self.suggestions : suggestions // ignore: cast_nullable_to_non_nullable
-as List<String>,weather: freezed == weather ? _self.weather : weather // ignore: cast_nullable_to_non_nullable
-as Weather?,searchStatus: null == searchStatus ? _self.searchStatus : searchStatus // ignore: cast_nullable_to_non_nullable
-as WeatherSearchStatus,loadStatus: null == loadStatus ? _self.loadStatus : loadStatus // ignore: cast_nullable_to_non_nullable
+weather: freezed == weather ? _self.weather : weather // ignore: cast_nullable_to_non_nullable
+as Weather?,loadStatus: null == loadStatus ? _self.loadStatus : loadStatus // ignore: cast_nullable_to_non_nullable
 as WeatherLoadStatus,requestedCity: null == requestedCity ? _self.requestedCity : requestedCity // ignore: cast_nullable_to_non_nullable
 as String,
   ));
@@ -154,10 +152,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<String> suggestions,  Weather? weather,  WeatherSearchStatus searchStatus,  WeatherLoadStatus loadStatus,  String requestedCity)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( Weather? weather,  WeatherLoadStatus loadStatus,  String requestedCity)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _WeatherState() when $default != null:
-return $default(_that.suggestions,_that.weather,_that.searchStatus,_that.loadStatus,_that.requestedCity);case _:
+return $default(_that.weather,_that.loadStatus,_that.requestedCity);case _:
   return orElse();
 
 }
@@ -175,10 +173,10 @@ return $default(_that.suggestions,_that.weather,_that.searchStatus,_that.loadSta
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<String> suggestions,  Weather? weather,  WeatherSearchStatus searchStatus,  WeatherLoadStatus loadStatus,  String requestedCity)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( Weather? weather,  WeatherLoadStatus loadStatus,  String requestedCity)  $default,) {final _that = this;
 switch (_that) {
 case _WeatherState():
-return $default(_that.suggestions,_that.weather,_that.searchStatus,_that.loadStatus,_that.requestedCity);case _:
+return $default(_that.weather,_that.loadStatus,_that.requestedCity);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -195,10 +193,10 @@ return $default(_that.suggestions,_that.weather,_that.searchStatus,_that.loadSta
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<String> suggestions,  Weather? weather,  WeatherSearchStatus searchStatus,  WeatherLoadStatus loadStatus,  String requestedCity)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( Weather? weather,  WeatherLoadStatus loadStatus,  String requestedCity)?  $default,) {final _that = this;
 switch (_that) {
 case _WeatherState() when $default != null:
-return $default(_that.suggestions,_that.weather,_that.searchStatus,_that.loadStatus,_that.requestedCity);case _:
+return $default(_that.weather,_that.loadStatus,_that.requestedCity);case _:
   return null;
 
 }
@@ -210,18 +208,10 @@ return $default(_that.suggestions,_that.weather,_that.searchStatus,_that.loadSta
 
 
 class _WeatherState implements WeatherState {
-  const _WeatherState({final  List<String> suggestions = const [], this.weather, this.searchStatus = WeatherSearchStatus.idle, this.loadStatus = WeatherLoadStatus.idle, this.requestedCity = ''}): _suggestions = suggestions;
+  const _WeatherState({this.weather, this.loadStatus = WeatherLoadStatus.idle, this.requestedCity = ''});
   
 
- final  List<String> _suggestions;
-@override@JsonKey() List<String> get suggestions {
-  if (_suggestions is EqualUnmodifiableListView) return _suggestions;
-  // ignore: implicit_dynamic_type
-  return EqualUnmodifiableListView(_suggestions);
-}
-
 @override final  Weather? weather;
-@override@JsonKey() final  WeatherSearchStatus searchStatus;
 @override@JsonKey() final  WeatherLoadStatus loadStatus;
 @override@JsonKey() final  String requestedCity;
 
@@ -235,16 +225,16 @@ _$WeatherStateCopyWith<_WeatherState> get copyWith => __$WeatherStateCopyWithImp
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _WeatherState&&const DeepCollectionEquality().equals(other._suggestions, _suggestions)&&(identical(other.weather, weather) || other.weather == weather)&&(identical(other.searchStatus, searchStatus) || other.searchStatus == searchStatus)&&(identical(other.loadStatus, loadStatus) || other.loadStatus == loadStatus)&&(identical(other.requestedCity, requestedCity) || other.requestedCity == requestedCity));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _WeatherState&&(identical(other.weather, weather) || other.weather == weather)&&(identical(other.loadStatus, loadStatus) || other.loadStatus == loadStatus)&&(identical(other.requestedCity, requestedCity) || other.requestedCity == requestedCity));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_suggestions),weather,searchStatus,loadStatus,requestedCity);
+int get hashCode => Object.hash(runtimeType,weather,loadStatus,requestedCity);
 
 @override
 String toString() {
-  return 'WeatherState(suggestions: $suggestions, weather: $weather, searchStatus: $searchStatus, loadStatus: $loadStatus, requestedCity: $requestedCity)';
+  return 'WeatherState(weather: $weather, loadStatus: $loadStatus, requestedCity: $requestedCity)';
 }
 
 
@@ -255,7 +245,7 @@ abstract mixin class _$WeatherStateCopyWith<$Res> implements $WeatherStateCopyWi
   factory _$WeatherStateCopyWith(_WeatherState value, $Res Function(_WeatherState) _then) = __$WeatherStateCopyWithImpl;
 @override @useResult
 $Res call({
- List<String> suggestions, Weather? weather, WeatherSearchStatus searchStatus, WeatherLoadStatus loadStatus, String requestedCity
+ Weather? weather, WeatherLoadStatus loadStatus, String requestedCity
 });
 
 
@@ -272,12 +262,10 @@ class __$WeatherStateCopyWithImpl<$Res>
 
 /// Create a copy of WeatherState
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? suggestions = null,Object? weather = freezed,Object? searchStatus = null,Object? loadStatus = null,Object? requestedCity = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? weather = freezed,Object? loadStatus = null,Object? requestedCity = null,}) {
   return _then(_WeatherState(
-suggestions: null == suggestions ? _self._suggestions : suggestions // ignore: cast_nullable_to_non_nullable
-as List<String>,weather: freezed == weather ? _self.weather : weather // ignore: cast_nullable_to_non_nullable
-as Weather?,searchStatus: null == searchStatus ? _self.searchStatus : searchStatus // ignore: cast_nullable_to_non_nullable
-as WeatherSearchStatus,loadStatus: null == loadStatus ? _self.loadStatus : loadStatus // ignore: cast_nullable_to_non_nullable
+weather: freezed == weather ? _self.weather : weather // ignore: cast_nullable_to_non_nullable
+as Weather?,loadStatus: null == loadStatus ? _self.loadStatus : loadStatus // ignore: cast_nullable_to_non_nullable
 as WeatherLoadStatus,requestedCity: null == requestedCity ? _self.requestedCity : requestedCity // ignore: cast_nullable_to_non_nullable
 as String,
   ));

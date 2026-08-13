@@ -54,13 +54,13 @@ void main() {
     );
     expect(events.where((event) => event == 'build').length, 1);
 
-    viewModel.setValue(1);
+    await viewModel.setValue(1);
     await tester.pump();
     await tester.pump();
     expect(find.text('value:1'), findsOneWidget);
     expect(events.where((event) => event == 'build').length, 2);
 
-    viewModel.setValue(2);
+    await viewModel.setValue(2);
     await tester.pump();
     await tester.pump();
     expect(events.where((event) => event == 'build').length, 3);
@@ -76,13 +76,13 @@ void main() {
       _TestHost(viewModel: viewModel, events: events, selectParity: true),
     );
 
-    viewModel.setValue(2);
+    await viewModel.setValue(2);
     await tester.pump();
     await tester.pump();
     expect(events.where((event) => event == 'build').length, 1);
     expect(find.text('parity:0'), findsOneWidget);
 
-    viewModel.setValue(3);
+    await viewModel.setValue(3);
     await tester.pump();
     await tester.pump();
     expect(events.where((event) => event == 'build').length, 2);
@@ -99,7 +99,7 @@ void main() {
     await tester.pumpWidget(_ConditionalWatchHost(viewModel, events, false));
     await tester.pump();
 
-    viewModel.setValue(1);
+    await viewModel.setValue(1);
     await tester.pump();
 
     expect(events.where((event) => event == 'build').length, 2);
@@ -125,7 +125,7 @@ void main() {
     );
     await tester.pump();
 
-    viewModel.setValue(1);
+    await viewModel.setValue(1);
     await tester.pump();
 
     expect(events.where((event) => event == 'build').length, 2);
@@ -143,7 +143,7 @@ void main() {
     );
     key.currentState!.disableWatch();
     await tester.idle();
-    viewModel.setValue(1);
+    await viewModel.setValue(1);
     await tester.pump();
     await tester.pump();
 
@@ -273,17 +273,17 @@ void main() {
     expect(find.text('value:10'), findsOneWidget);
     expect(key.currentState!.builds, 2);
     expect(key.currentState!.selections, 2);
-    first.setValue(1);
+    await first.setValue(1);
     await tester.pump();
     expect(find.text('value:10'), findsOneWidget);
     expect(key.currentState!.builds, 2);
     expect(key.currentState!.selections, 2);
-    first.setValue(2);
+    await first.setValue(2);
     await tester.pump();
     expect(find.text('value:10'), findsOneWidget);
     expect(key.currentState!.builds, 2);
     expect(key.currentState!.selections, 2);
-    second.setValue(11);
+    await second.setValue(11);
     await tester.pump();
     await tester.pump();
     expect(find.text('value:11'), findsOneWidget);
@@ -293,11 +293,11 @@ void main() {
     final vm = _BindingViewModel();
     final events = <String>[];
     await tester.pumpWidget(_CustomEqualityHost(vm, events));
-    vm.setValue(2);
+    await vm.setValue(2);
     await tester.pump();
     await tester.pump();
     expect(events.where((e) => e == 'build').length, 1);
-    vm.setValue(3);
+    await vm.setValue(3);
     await tester.pump();
     await tester.pump();
     expect(events.where((e) => e == 'build').length, 2);
@@ -309,13 +309,13 @@ void main() {
     final key = GlobalKey<_ExternalHostState>();
     await tester.pumpWidget(_ExternalHost(key: key, vm: vm, events: events));
     await tester.pumpWidget(_ExternalHost(key: key, vm: vm, events: events));
-    vm.setValue(1);
+    await vm.setValue(1);
     vm.emit('before');
     await tester.pump();
     expect(events.where((e) => e == 'effect:before').length, 3);
     final builds = events.where((e) => e == 'build').length;
     await tester.pumpWidget(const SizedBox());
-    vm.setValue(2);
+    await vm.setValue(2);
     vm.emit('after');
     await tester.pump();
     expect(events.where((e) => e == 'build').length, builds);
@@ -460,17 +460,15 @@ final class _DuplicateListenHostState extends State<_DuplicateListenHost>
   }
 }
 
-final class _BindingViewModel extends ViewModel {
-  _BindingViewModel({this.disposeCallback});
+final class _BindingViewModel extends ViewModel<int> {
+  _BindingViewModel({this.disposeCallback}) : super(0);
 
   final VoidCallback? disposeCallback;
-  late final MutableState<int> _state = mutableStateOf(0);
   late final MutableEffects<String> _effects = effectsOf();
 
-  StateValue<int> get state => _state;
   Effects<String> get effects => _effects;
 
-  void setValue(int value) => _state.value = value;
+  Future<void> setValue(int value) => execute((task) async => task.updateState((_) => value));
   void emit(String effect) => _effects.emit(effect);
 
   @override
@@ -601,8 +599,8 @@ final class _LookupHostState extends State<_LookupHost> with AtelierVmMixin<_Bin
 final _errorA = StateError('error A');
 final _errorB = StateError('error B');
 
-final class _FailingViewModel extends ViewModel {
-  _FailingViewModel(this.events, this.effects);
+final class _FailingViewModel extends ViewModel<String> {
+  _FailingViewModel(this.events, this.effects) : super('initial');
   final List<String> events;
   final _SynchronousEffects effects;
 
@@ -797,12 +795,9 @@ final class _TrackingSubscription implements StreamSubscription<String> {
   Future<E> asFuture<E>([E? futureValue]) => _delegate.asFuture(futureValue);
 }
 
-final class _SourceVm extends ViewModel {
-  _SourceVm(int initial) : _initial = initial;
-  final int _initial;
-  late final MutableState<int> _state = mutableStateOf(_initial);
-  StateValue<int> get state => _state;
-  void setValue(int value) => _state.value = value;
+final class _SourceVm extends ViewModel<int> {
+  _SourceVm(super.initial);
+  Future<void> setValue(int value) => execute((task) async => task.updateState((_) => value));
 }
 
 final class _CustomEqualityHost extends StatefulWidget {

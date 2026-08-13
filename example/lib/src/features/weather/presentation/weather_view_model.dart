@@ -6,63 +6,27 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 
 part 'weather_view_model.freezed.dart';
 
-class WeatherViewModel extends ViewModel {
-  WeatherViewModel(this._repository);
+class WeatherViewModel extends ViewModel<WeatherState> {
+  WeatherViewModel(this._repository) : super(const WeatherState());
 
   final WeatherRepository _repository;
-  late final _state = mutableStateOf(const WeatherState());
-
-  StateValue<WeatherState> get state => _state;
-
-  Future<void> search(String query) => execute.restartable(key: #searchWeather, (task) async {
-    final normalizedQuery = query.trim();
-    if (normalizedQuery.isEmpty) {
-      _state.update(
-        (state) => state.copyWith(suggestions: const [], searchStatus: WeatherSearchStatus.idle),
-      );
-      return;
-    }
-
-    _state.update((state) => state.copyWith(searchStatus: WeatherSearchStatus.loading));
-
-    try {
-      final suggestions = await _repository.search(normalizedQuery, cancellationToken: task);
-      _state.update(
-        (state) => state.copyWith(suggestions: suggestions, searchStatus: WeatherSearchStatus.idle),
-      );
-    } on WeatherNotFoundException {
-      _state.update(
-        (state) => state.copyWith(suggestions: const [], searchStatus: WeatherSearchStatus.idle),
-      );
-    } on WeatherServiceException {
-      _state.update(
-        (state) => state.copyWith(suggestions: const [], searchStatus: WeatherSearchStatus.failed),
-      );
-    }
-  });
 
   Future<void> load(String city) => execute.restartable(key: #loadWeather, (task) async {
     final normalizedCity = city.trim();
     if (normalizedCity.isEmpty) {
-      _state.update(
-        (state) => state.copyWith(requestedCity: '', loadStatus: WeatherLoadStatus.emptyInput),
-      );
+      task.updateState((state) => state.copyWith(requestedCity: '', loadStatus: .emptyInput));
       return;
     }
-    _state.update(
-      (state) =>
-          state.copyWith(requestedCity: normalizedCity, loadStatus: WeatherLoadStatus.loading),
-    );
+
+    task.updateState((state) => state.copyWith(requestedCity: normalizedCity, loadStatus: .loading));
 
     try {
       final weather = await _repository.load(normalizedCity, cancellationToken: task);
-      _state.update(
-        (state) => state.copyWith(weather: weather, loadStatus: WeatherLoadStatus.ready),
-      );
+      task.updateState((state) => state.copyWith(weather: weather, loadStatus: .success));
     } on WeatherNotFoundException {
-      _state.update((state) => state.copyWith(loadStatus: WeatherLoadStatus.notFound));
+      task.updateState((state) => state.copyWith(loadStatus: .notFound));
     } on WeatherServiceException {
-      _state.update((state) => state.copyWith(loadStatus: WeatherLoadStatus.serviceUnavailable));
+      task.updateState((state) => state.copyWith(loadStatus: .serviceUnavailable));
     }
   });
 }
@@ -70,14 +34,10 @@ class WeatherViewModel extends ViewModel {
 @freezed
 abstract class WeatherState with _$WeatherState {
   const factory WeatherState({
-    @Default([]) List<String> suggestions,
     Weather? weather,
-    @Default(WeatherSearchStatus.idle) WeatherSearchStatus searchStatus,
     @Default(WeatherLoadStatus.idle) WeatherLoadStatus loadStatus,
     @Default('') String requestedCity,
   }) = _WeatherState;
 }
 
-enum WeatherSearchStatus { idle, loading, failed }
-
-enum WeatherLoadStatus { idle, loading, ready, emptyInput, notFound, serviceUnavailable }
+enum WeatherLoadStatus { idle, loading, success, emptyInput, notFound, serviceUnavailable }

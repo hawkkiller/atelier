@@ -138,7 +138,8 @@ mixin AtelierAutoDisposeMixin<W extends StatefulWidget> on State<W> implements A
 /// this is still initialization, [createViewModel] must use non-listening
 /// context lookups such as [BuildContext.getInheritedWidgetOfExactType], not
 /// `dependOnInheritedWidgetOfExactType`.
-mixin AtelierVmMixin<VM extends ViewModel, W extends StatefulWidget> on State<W> implements AtelierStateBindings {
+mixin AtelierVmMixin<VM extends ViewModel<Object>, W extends StatefulWidget> on State<W>
+    implements AtelierStateBindings {
   late final _atelierLifecycle = _AtelierStateLifecycle(
     isMounted: () => mounted,
     rebuild: () => setState(() {}),

@@ -25,7 +25,7 @@ void main() {
     expect(viewModel.state.value.requestedCity, '');
   });
 
-  test('load normalizes city and transitions loading to ready', () async {
+  test('load normalizes city and transitions loading to success', () async {
     final completer = Completer<Weather>();
     final repository = _ControlledRepository(
       loadResult: () => completer.future,
@@ -37,7 +37,7 @@ void main() {
     completer.complete(weather);
     await future;
     expect(viewModel.state.value.weather, weather);
-    expect(viewModel.state.value.loadStatus, WeatherLoadStatus.ready);
+    expect(viewModel.state.value.loadStatus, WeatherLoadStatus.success);
   });
 
   test('not found and service failure retain prior weather', () async {
@@ -57,47 +57,17 @@ void main() {
     );
   });
 
-  test(
-    'search covers loading, success, empty, not found and failure',
-    () async {
-      final completer = Completer<List<String>>();
-      final repository = _ControlledRepository(
-        searchResult: () => completer.future,
-      );
-      final viewModel = WeatherViewModel(repository);
-      final future = viewModel.search(' War ');
-      expect(viewModel.state.value.searchStatus, WeatherSearchStatus.loading);
-      completer.complete(['Warsaw']);
-      await future;
-      expect(viewModel.state.value.suggestions, ['Warsaw']);
-      await viewModel.search(' ');
-      expect(viewModel.state.value.searchStatus, WeatherSearchStatus.idle);
-      expect(viewModel.state.value.suggestions, isEmpty);
-      repository.searchError = const WeatherNotFoundException();
-      await viewModel.search('none');
-      expect(viewModel.state.value.searchStatus, WeatherSearchStatus.idle);
-      repository.searchError = const WeatherServiceException('raw');
-      await viewModel.search('fail');
-      expect(viewModel.state.value.searchStatus, WeatherSearchStatus.failed);
-    },
-  );
-
   test('unexpected repository errors propagate', () async {
     final repository = _ControlledRepository()..loadError = StateError('bug');
     final viewModel = WeatherViewModel(repository);
     await expectLater(viewModel.load('Warsaw'), throwsStateError);
-    repository.loadError = null;
-    repository.searchError = StateError('bug');
-    await expectLater(viewModel.search('War'), throwsStateError);
   });
 }
 
 final class _ControlledRepository implements WeatherRepository {
-  _ControlledRepository({this.loadResult, this.searchResult});
+  _ControlledRepository({this.loadResult});
   final Future<Weather> Function()? loadResult;
-  final Future<List<String>> Function()? searchResult;
   Object? loadError;
-  Object? searchError;
   final loadCalls = <String>[];
 
   @override
@@ -118,13 +88,7 @@ final class _ControlledRepository implements WeatherRepository {
   }
 
   @override
-  Future<List<String>> search(
-    String query, {
-    required CancellationToken cancellationToken,
-  }) async {
-    if (searchError case final error?) throw error;
-    return searchResult?.call() ?? const [];
-  }
+  Future<List<String>> search(String query, {required CancellationToken cancellationToken}) async => const [];
 
   @override
   void close() {}

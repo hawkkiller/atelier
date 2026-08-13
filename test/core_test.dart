@@ -11,13 +11,14 @@ void main() {
       final second = <int>[];
 
       viewModel.state.listen(first.add);
-      viewModel.setValue(1);
-      viewModel.setValue(1);
+      final firstUpdate = viewModel.setValue(1);
+      final equalUpdate = viewModel.setValue(1);
       viewModel.state.listen(second.add);
-      viewModel.increment();
+      final increment = viewModel.increment();
 
       expect(first, isEmpty);
       expect(second, isEmpty);
+      await Future.wait([firstUpdate, equalUpdate, increment]);
       await Future<void>.delayed(Duration.zero);
 
       expect(first, [0, 1, 1, 2]);
@@ -28,7 +29,7 @@ void main() {
       expect(_TestViewModel().state.isBroadcast, isTrue);
     });
 
-    test('closes and rejects mutations when ViewModel is disposed', () async {
+    test('closes and ignores mutation commands when disposed', () async {
       final viewModel = _TestViewModel();
       final done = Completer<void>();
       viewModel.state.listen((_) {}, onDone: done.complete);
@@ -36,10 +37,9 @@ void main() {
       viewModel.dispose();
 
       await done.future;
-      expect(
-        () => viewModel.setValue(1),
-        throwsA(isA<MutableStateDisposedError>()),
-      );
+      final before = viewModel.state.value;
+      await viewModel.setValue(1);
+      expect(viewModel.state.value, before);
     });
   });
 
@@ -83,6 +83,182 @@ void main() {
   });
 
   group('ViewModel', () {
+    test('reduces FIFO updates against the latest state and emits equals', () async {
+      final viewModel = _TestViewModel();
+      final values = <int>[];
+      viewModel.state.listen(values.add);
+      await viewModel.execute((task) async {
+        task.updateState((value) => value + 1);
+        task.updateState((value) => value);
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(viewModel.state.value, 1);
+      expect(values, [0, 1, 1]);
+    });
+
+    test('state is synchronously visible before the first await', () async {
+      final viewModel = _TestViewModel();
+      final reachedAwait = Completer<void>();
+      final task = viewModel.execute((context) async {
+        context.updateState((_) => 7);
+        expect(viewModel.state.value, 7);
+        reachedAwait.complete();
+        await Future<void>.delayed(Duration.zero);
+      });
+      await reachedAwait.future;
+      expect(viewModel.state.value, 7);
+      await task;
+    });
+
+    test('concurrent contexts linearize updates in call order', () async {
+      final viewModel = _TestViewModel();
+      final firstGate = Completer<void>();
+      final secondGate = Completer<void>();
+      final order = <String>[];
+      final first = viewModel.execute.concurrent((task) async {
+        await firstGate.future;
+        task.updateState((value) {
+          order.add('first');
+          return value + 1;
+        });
+      });
+      final second = viewModel.execute.concurrent((task) async {
+        await secondGate.future;
+        task.updateState((value) {
+          order.add('second');
+          return value + 1;
+        });
+      });
+      secondGate.complete();
+      await Future<void>.delayed(Duration.zero);
+      firstGate.complete();
+      await Future.wait([first, second]);
+      expect(order, ['second', 'first']);
+      expect(viewModel.state.value, 2);
+    });
+
+    test('captured contexts silently no-op after completion, replacement, and disposal', () async {
+      final completed = _TestViewModel();
+      late TaskContext<int> completedContext;
+      await completed.execute((task) async {
+        completedContext = task;
+      });
+      var evaluated = false;
+      completedContext.updateState((value) {
+        evaluated = true;
+        return value + 1;
+      });
+      expect(evaluated, isFalse);
+
+      final replaced = _TestViewModel();
+      final gate = Completer<void>();
+      late TaskContext<int> replacedContext;
+      final first = replaced.execute.restartable(key: 'x', (task) async {
+        replacedContext = task;
+        await gate.future;
+      });
+      await replaced.execute.restartable(key: 'x', (task) async {});
+      var replacedEvaluated = false;
+      replacedContext.updateState((value) {
+        replacedEvaluated = true;
+        return value + 1;
+      });
+      expect(replacedEvaluated, isFalse);
+      gate.complete();
+      await first;
+
+      final disposed = _TestViewModel();
+      late TaskContext<int> disposedContext;
+      final pending = disposed.execute((task) async {
+        disposedContext = task;
+        await Future<void>.delayed(Duration.zero);
+      });
+      disposed.dispose();
+      var disposedEvaluated = false;
+      disposedContext.updateState((value) {
+        disposedEvaluated = true;
+        return value + 1;
+      });
+      expect(disposedEvaluated, isFalse);
+      await pending;
+    });
+
+    test('reducer errors propagate and later updates recover', () async {
+      final viewModel = _TestViewModel();
+      await expectLater(
+        viewModel.execute((task) async {
+          task.updateState((_) => throw StateError('reducer'));
+        }),
+        throwsStateError,
+      );
+      expect(viewModel.state.value, 0);
+      await viewModel.execute((task) async {
+        task.updateState((_) => 3);
+      });
+      expect(viewModel.state.value, 3);
+    });
+
+    test('reducers reject nested updates, task starts, and disposal', () async {
+      final nested = _TestViewModel();
+      await expectLater(
+        nested.execute((task) async {
+          task.updateState((value) {
+            task.updateState((_) => 9);
+            return value + 1;
+          });
+        }),
+        throwsStateError,
+      );
+      expect(nested.state.value, 0);
+
+      final starting = _TestViewModel();
+      await expectLater(
+        starting.execute((task) async {
+          task.updateState((value) {
+            starting.execute((_) async {});
+            return value + 1;
+          });
+        }),
+        throwsStateError,
+      );
+      expect(starting.state.value, 0);
+
+      final restarting = _TestViewModel();
+      await expectLater(
+        restarting.execute.restartable(key: 'owned', (task) async {
+          task.updateState((value) {
+            restarting.execute.restartable(key: 'owned', (task) async {});
+            return value + 1;
+          });
+        }),
+        throwsStateError,
+      );
+      expect(restarting.state.value, 0);
+
+      final disposing = _TestViewModel();
+      await expectLater(
+        disposing.execute((task) async {
+          task.updateState((value) {
+            disposing.dispose();
+            return value + 1;
+          });
+        }),
+        throwsStateError,
+      );
+      expect(disposing.state.value, 0);
+    });
+
+    test('onDispose can read state and emit effects', () async {
+      final viewModel = _LifecycleViewModel();
+      final effects = <String>[];
+      await viewModel.setValue(4);
+      viewModel.effects.listen(effects.add);
+      viewModel.dispose();
+      expect(viewModel.stateDuringDispose, 4);
+      await Future<void>.delayed(Duration.zero);
+      expect(effects, ['during']);
+    });
+
     test('disposal is idempotent', () {
       final viewModel = _TestViewModel();
 
@@ -100,10 +276,8 @@ void main() {
 
       expect(viewModel.dispose, throwsA(isA<ArgumentError>()));
       await done.future;
-      expect(
-        () => viewModel.update(),
-        throwsA(isA<MutableStateDisposedError>()),
-      );
+      await viewModel.update();
+      expect(viewModel.state.value, 0);
     });
 
     test('cancels tasks before onDispose and closes channels afterward', () async {
@@ -128,10 +302,8 @@ void main() {
       taskGate.complete();
       await task;
       await Future.wait([stateDone.future, effectsDone.future]);
-      expect(
-        () => viewModel.setValue(2),
-        throwsA(isA<MutableStateDisposedError>()),
-      );
+      await viewModel.setValue(2);
+      expect(viewModel.state.value, 0);
       expect(
         () => viewModel.emit('after'),
         throwsA(isA<EffectsDisposedError>()),
@@ -148,10 +320,8 @@ void main() {
       expect(viewModel.dispose, throwsA(isA<ArgumentError>()));
       await Future.wait([stateDone.future, effectsDone.future]);
       expect(viewModel.channelsUsableDuringDispose, isTrue);
-      expect(
-        () => viewModel.setValue(2),
-        throwsA(isA<MutableStateDisposedError>()),
-      );
+      await viewModel.setValue(2);
+      expect(viewModel.state.value, 0);
       expect(
         () => viewModel.emit('after'),
         throwsA(isA<EffectsDisposedError>()),
@@ -258,10 +428,10 @@ void main() {
 
       final first = viewModel.execute.restartable(key: 'load', (task) async {
         await gate.future;
-        viewModel.setValue(1);
+        task.updateState((_) => 1);
       });
       await viewModel.execute.restartable(key: 'load', (task) async {
-        viewModel.setValue(2);
+        task.updateState((_) => 2);
       });
 
       gate.complete();
@@ -673,16 +843,15 @@ Future<void> _startPolicy(
   };
 }
 
-final class _TestViewModel extends ViewModel {
-  late final MutableState<int> _state = mutableStateOf(0);
+final class _TestViewModel extends ViewModel<int> {
+  _TestViewModel() : super(0);
   late final MutableEffects<String> _effects = effectsOf();
 
-  StateValue<int> get state => _state;
   Effects<String> get effects => _effects;
   int disposeCount = 0;
 
-  void setValue(int value) => _state.value = value;
-  void increment() => _state.update((value) => value + 1);
+  Future<void> setValue(int value) => execute((task) async => task.updateState((_) => value));
+  Future<void> increment() => execute((task) async => task.updateState((value) => value + 1));
   void emit(String effect) => _effects.emit(effect);
 
   @override
@@ -691,28 +860,27 @@ final class _TestViewModel extends ViewModel {
   }
 }
 
-final class _LifecycleViewModel extends ViewModel {
-  _LifecycleViewModel({this.throwOnDispose = false});
+final class _LifecycleViewModel extends ViewModel<int> {
+  _LifecycleViewModel({this.throwOnDispose = false}) : super(0);
 
   final bool throwOnDispose;
-  late final MutableState<int> _state = mutableStateOf(0);
   late final MutableEffects<String> _effects = effectsOf();
   TaskContext? taskContext;
   bool sawCancelledTask = false;
   bool channelsUsableDuringDispose = false;
+  int? stateDuringDispose;
   int disposeCount = 0;
 
-  StateValue<int> get state => _state;
   Effects<String> get effects => _effects;
 
-  void setValue(int value) => _state.value = value;
+  Future<void> setValue(int value) => execute((task) async => task.updateState((_) => value));
   void emit(String effect) => _effects.emit(effect);
 
   @override
   void onDispose() {
     disposeCount++;
     sawCancelledTask = taskContext?.isCancelled ?? false;
-    _state.value = 1;
+    stateDuringDispose = state.value;
     _effects.emit('during');
     channelsUsableDuringDispose = true;
     if (throwOnDispose) {
@@ -721,12 +889,10 @@ final class _LifecycleViewModel extends ViewModel {
   }
 }
 
-final class _ThrowingDisposeViewModel extends ViewModel {
-  late final MutableState<int> _state = mutableStateOf(0);
+final class _ThrowingDisposeViewModel extends ViewModel<int> {
+  _ThrowingDisposeViewModel() : super(0);
 
-  StateValue<int> get state => _state;
-
-  void update() => _state.value++;
+  Future<void> update() => execute((task) async => task.updateState((value) => value + 1));
 
   @override
   void onDispose() {
