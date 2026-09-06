@@ -289,6 +289,55 @@ void main() {
     expect(find.text('value:11'), findsOneWidget);
   });
 
+  testWidgets('failed view trims old watches and the next view recovers', (tester) async {
+    final vm = _SourceVm(0);
+    addTearDown(vm.dispose);
+    final key = GlobalKey<_SourceHostState>();
+    await tester.pumpWidget(_SourceHost(key: key, source: vm.state));
+    final host = key.currentState!;
+    host.fail();
+    await tester.pump();
+    expect(tester.takeException(), isA<StateError>());
+    final builds = host.builds;
+    final selections = host.selections;
+    await vm.setValue(1);
+    await tester.pump();
+    expect(host.builds, builds);
+    expect(host.selections, selections);
+    host.replace(vm.state);
+    await tester.pump();
+    expect(find.text('value:1'), findsOneWidget);
+    await vm.setValue(2);
+    await tester.pump();
+    expect(find.text('value:2'), findsOneWidget);
+  });
+
+  testWidgets('hot reload rebuild keeps one watch subscription', (tester) async {
+    final vm = _SourceVm(0);
+    addTearDown(vm.dispose);
+    final key = GlobalKey<_SourceHostState>();
+    await tester.pumpWidget(_SourceHost(key: key, source: vm.state));
+    tester.binding.buildOwner!.reassemble(tester.binding.rootElement!);
+    await tester.pump();
+    final host = key.currentState!;
+    final selections = host.selections;
+    final builds = host.builds;
+    await vm.setValue(1);
+    await tester.pump();
+    expect(host.builds, builds + 1);
+    // Once for notification, once for the new view.
+    expect(host.selections, selections + 2);
+  });
+
+  testWidgets('watch outside view reports misuse without subscribing', (tester) async {
+    final vm = _SourceVm(0);
+    addTearDown(vm.dispose);
+    final key = GlobalKey<_SourceHostState>();
+    await tester.pumpWidget(_SourceHost(key: key, source: vm.state));
+    expect(() => key.currentState!.watch(vm.state), throwsStateError);
+    expect(() => key.currentState!.watchSelect(vm.state, (value) => value), throwsStateError);
+  });
+
   testWidgets('watchSelect honors custom equality', (tester) async {
     final vm = _BindingViewModel();
     final events = <String>[];
@@ -351,7 +400,7 @@ final class _ConditionalWatchHost extends StatefulWidget {
 final class _ConditionalWatchHostState extends State<_ConditionalWatchHost>
     with AtelierAutoDisposeMixin<_ConditionalWatchHost> {
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     widget.events.add('build');
     return Directionality(
       textDirection: TextDirection.ltr,
@@ -386,7 +435,7 @@ final class _ToggleWatchHostState extends State<_ToggleWatchHost> with AtelierAu
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     widget.events.add('build');
     return Directionality(
       textDirection: TextDirection.ltr,
@@ -419,7 +468,7 @@ final class _InheritedWatchHost extends StatefulWidget {
 final class _InheritedWatchHostState extends State<_InheritedWatchHost>
     with AtelierAutoDisposeMixin<_InheritedWatchHost> {
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     widget.events.add('build');
     final useWatch = _WatchFlagScope.of(context);
     return Directionality(
@@ -455,7 +504,7 @@ final class _DuplicateListenHostState extends State<_DuplicateListenHost>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     return const SizedBox();
   }
 }
@@ -516,7 +565,7 @@ final class _TestHostState extends State<_TestHost> with AtelierVmMixin<_Binding
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     widget.events.add('build');
     final text = widget.selectParity
         ? 'parity:${watchSelect(viewModel.state, (value) => value % 2)}'
@@ -546,7 +595,7 @@ final class _AutoDisposeHostState extends State<_AutoDisposeHost> with AtelierAu
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     return Directionality(
       textDirection: TextDirection.ltr,
       child: Text(controller.text),
@@ -587,7 +636,7 @@ final class _LookupHostState extends State<_LookupHost> with AtelierVmMixin<_Bin
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     widget.events.add('build');
     return Directionality(
       textDirection: TextDirection.ltr,
@@ -621,15 +670,14 @@ final class _FailingVmWidget extends StatefulWidget {
   State<_FailingVmWidget> createState() => _FailingVmState();
 }
 
-class _FailingVmBaseState extends State<_FailingVmWidget> {
+abstract class _FailingVmBaseState extends State<_FailingVmWidget> {
   @override
   void dispose() {
     widget.events.add('super');
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) => const SizedBox();
+  Widget view(BuildContext context) => const SizedBox();
 }
 
 final class _FailingVmState extends _FailingVmBaseState with AtelierVmMixin<_FailingViewModel, _FailingVmWidget> {
@@ -655,15 +703,14 @@ final class _FailingAutoWidget extends StatefulWidget {
   State<_FailingAutoWidget> createState() => _FailingAutoState();
 }
 
-class _FailingAutoBaseState extends State<_FailingAutoWidget> {
+abstract class _FailingAutoBaseState extends State<_FailingAutoWidget> {
   @override
   void dispose() {
     widget.events.add('super');
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) => const SizedBox();
+  Widget view(BuildContext context) => const SizedBox();
 }
 
 final class _FailingAutoState extends _FailingAutoBaseState with AtelierAutoDisposeMixin<_FailingAutoWidget> {
@@ -704,7 +751,7 @@ final class _CountingHostState extends State<_CountingHost> with AtelierVmMixin<
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     _StableLifecycleScope.of(context);
     return Directionality(
       textDirection: TextDirection.ltr,
@@ -724,10 +771,16 @@ final class _SourceHostState extends State<_SourceHost> with AtelierAutoDisposeM
   late StateValue<int> source = widget.source;
   var builds = 0;
   var selections = 0;
-  void replace(StateValue<int> next) => setState(() => source = next);
+  bool shouldFail = false;
+  void fail() => setState(() => shouldFail = true);
+  void replace(StateValue<int> next) => setState(() {
+    shouldFail = false;
+    source = next;
+  });
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     builds++;
+    if (shouldFail) throw StateError('View failed');
     final value = watchSelect(source, (value) {
       selections++;
       return value;
@@ -811,7 +864,7 @@ final class _CustomEqualityHost extends StatefulWidget {
 final class _CustomEqualityHostState extends State<_CustomEqualityHost>
     with AtelierAutoDisposeMixin<_CustomEqualityHost> {
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     widget.events.add('build');
     return Directionality(
       textDirection: TextDirection.ltr,
@@ -849,7 +902,7 @@ final class _ExternalHostState extends State<_ExternalHost> with AtelierAutoDisp
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     widget.events.add('build');
     return Directionality(
       textDirection: TextDirection.ltr,

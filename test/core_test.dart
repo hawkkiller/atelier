@@ -87,7 +87,7 @@ void main() {
       final viewModel = _TestViewModel();
       final values = <int>[];
       viewModel.state.listen(values.add);
-      await viewModel.execute((task) async {
+      await viewModel.tasks((task) async {
         task.updateState((value) => value + 1);
         task.updateState((value) => value);
       });
@@ -99,7 +99,7 @@ void main() {
     test('state is synchronously visible before the first await', () async {
       final viewModel = _TestViewModel();
       final reachedAwait = Completer<void>();
-      final task = viewModel.execute((context) async {
+      final task = viewModel.tasks((context) async {
         context.updateState((_) => 7);
         expect(viewModel.state.value, 7);
         reachedAwait.complete();
@@ -115,14 +115,14 @@ void main() {
       final firstGate = Completer<void>();
       final secondGate = Completer<void>();
       final order = <String>[];
-      final first = viewModel.execute.concurrent((task) async {
+      final first = viewModel.tasks((task) async {
         await firstGate.future;
         task.updateState((value) {
           order.add('first');
           return value + 1;
         });
       });
-      final second = viewModel.execute.concurrent((task) async {
+      final second = viewModel.tasks((task) async {
         await secondGate.future;
         task.updateState((value) {
           order.add('second');
@@ -140,7 +140,7 @@ void main() {
     test('captured contexts silently no-op after completion, replacement, and disposal', () async {
       final completed = _TestViewModel();
       late TaskContext<int> completedContext;
-      await completed.execute((task) async {
+      await completed.tasks((task) async {
         completedContext = task;
       });
       var evaluated = false;
@@ -153,11 +153,11 @@ void main() {
       final replaced = _TestViewModel();
       final gate = Completer<void>();
       late TaskContext<int> replacedContext;
-      final first = replaced.execute.restartable(key: 'x', (task) async {
+      final first = replaced.tasks.restartable(key: 'x', (task) async {
         replacedContext = task;
         await gate.future;
       });
-      await replaced.execute.restartable(key: 'x', (task) async {});
+      await replaced.tasks.restartable(key: 'x', (task) async {});
       var replacedEvaluated = false;
       replacedContext.updateState((value) {
         replacedEvaluated = true;
@@ -169,7 +169,7 @@ void main() {
 
       final disposed = _TestViewModel();
       late TaskContext<int> disposedContext;
-      final pending = disposed.execute((task) async {
+      final pending = disposed.tasks((task) async {
         disposedContext = task;
         await Future<void>.delayed(Duration.zero);
       });
@@ -186,13 +186,13 @@ void main() {
     test('reducer errors propagate and later updates recover', () async {
       final viewModel = _TestViewModel();
       await expectLater(
-        viewModel.execute((task) async {
+        viewModel.tasks((task) async {
           task.updateState((_) => throw StateError('reducer'));
         }),
         throwsStateError,
       );
       expect(viewModel.state.value, 0);
-      await viewModel.execute((task) async {
+      await viewModel.tasks((task) async {
         task.updateState((_) => 3);
       });
       expect(viewModel.state.value, 3);
@@ -201,7 +201,7 @@ void main() {
     test('reducers reject nested updates, task starts, and disposal', () async {
       final nested = _TestViewModel();
       await expectLater(
-        nested.execute((task) async {
+        nested.tasks((task) async {
           task.updateState((value) {
             task.updateState((_) => 9);
             return value + 1;
@@ -213,9 +213,9 @@ void main() {
 
       final starting = _TestViewModel();
       await expectLater(
-        starting.execute((task) async {
+        starting.tasks((task) async {
           task.updateState((value) {
-            starting.execute((_) async {});
+            starting.tasks((_) async {});
             return value + 1;
           });
         }),
@@ -225,9 +225,9 @@ void main() {
 
       final restarting = _TestViewModel();
       await expectLater(
-        restarting.execute.restartable(key: 'owned', (task) async {
+        restarting.tasks.restartable(key: 'owned', (task) async {
           task.updateState((value) {
-            restarting.execute.restartable(key: 'owned', (task) async {});
+            restarting.tasks.restartable(key: 'owned', (task) async {});
             return value + 1;
           });
         }),
@@ -237,7 +237,7 @@ void main() {
 
       final disposing = _TestViewModel();
       await expectLater(
-        disposing.execute((task) async {
+        disposing.tasks((task) async {
           task.updateState((value) {
             disposing.dispose();
             return value + 1;
@@ -288,7 +288,7 @@ void main() {
       viewModel.effects.listen((_) {}, onDone: effectsDone.complete);
       final taskGate = Completer<void>();
       late TaskContext taskContext;
-      final task = viewModel.execute.concurrent((context) async {
+      final task = viewModel.tasks((context) async {
         taskContext = context;
         viewModel.taskContext = context;
         await taskGate.future;
@@ -340,11 +340,11 @@ void main() {
       late TaskContext firstContext;
       late TaskContext secondContext;
 
-      final first = viewModel.execute.concurrent((task) async {
+      final first = viewModel.tasks((task) async {
         firstContext = task;
         await firstGate.future;
       }, key: 'load');
-      final second = viewModel.execute((task) async {
+      final second = viewModel.tasks((task) async {
         secondContext = task;
         await secondGate.future;
       }, key: 'load');
@@ -365,11 +365,11 @@ void main() {
       final gate = Completer<void>();
       var invocationCount = 0;
 
-      final first = viewModel.execute.droppable(key: 'login', (task) async {
+      final first = viewModel.tasks.droppable(key: 'login', (task) async {
         invocationCount++;
         await gate.future;
       });
-      final second = viewModel.execute.droppable(key: 'login', (task) async {
+      final second = viewModel.tasks.droppable(key: 'login', (task) async {
         invocationCount++;
       });
 
@@ -379,18 +379,86 @@ void main() {
       await second;
     });
 
+    test('reentrant droppable shares the future without invoking its block', () async {
+      final viewModel = _TestViewModel();
+      addTearDown(viewModel.dispose);
+      final gate = Completer<void>();
+      late Future<void> nested;
+      var repeatedBlockRan = false;
+      final first = viewModel.tasks.droppable(key: #login, (task) async {
+        nested = viewModel.tasks.droppable(key: #login, (_) async {
+          repeatedBlockRan = true;
+        });
+        await gate.future;
+      });
+      expect(identical(first, nested), isTrue);
+      expect(repeatedBlockRan, isFalse);
+      gate.complete();
+      await first;
+    });
+
+    test('reentrant restartable cancels the outer task and keeps the newest active', () async {
+      final viewModel = _TestViewModel();
+      addTearDown(viewModel.dispose);
+      final gate = Completer<void>();
+      late Future<void> nested;
+      late TaskContext<int> outerContext;
+      late TaskContext<int> nestedContext;
+      final first = viewModel.tasks.restartable(key: #search, (task) async {
+        outerContext = task;
+        nested = viewModel.tasks.restartable(key: #search, (next) async {
+          nestedContext = next;
+          await gate.future;
+          next.updateState((_) => 2);
+        });
+        task.updateState((_) => 1);
+      });
+      expect(outerContext.isCancelled, isTrue);
+      expect(viewModel.state.value, 0);
+      await first;
+      // Finishing the outer invocation must not release the nested task's lane.
+      await viewModel.tasks.restartable(key: #search, (task) async {
+        task.updateState((_) => 3);
+      });
+      expect(nestedContext.isCancelled, isTrue);
+      gate.complete();
+      await nested;
+      expect(viewModel.state.value, 3);
+    });
+
+    test('reentrant sequential waits for the outer task before running', () async {
+      final viewModel = _TestViewModel();
+      addTearDown(viewModel.dispose);
+      final gate = Completer<void>();
+      final events = <String>[];
+      late Future<void> nested;
+      final first = viewModel.tasks.sequential(key: #save, (task) async {
+        events.add('outer start');
+        nested = viewModel.tasks.sequential(key: #save, (_) async {
+          events.add('nested');
+        });
+        await gate.future;
+        events.add('outer end');
+      });
+      expect(events, ['outer start']);
+      gate.complete();
+      await first;
+      await nested;
+      expect(events, ['outer start', 'outer end', 'nested']);
+    });
+
     test('restartable invalidates the previous invocation', () async {
       final viewModel = _TestViewModel();
       final firstGate = Completer<void>();
       late TaskContext firstContext;
 
-      final first = viewModel.execute.restartable(key: 'search', (task) async {
+      final first = viewModel.tasks.restartable(key: 'search', (task) async {
         firstContext = task;
         await firstGate.future;
       });
       final firstResult = expectLater(first, completes);
 
-      final second = viewModel.execute.restartable(
+      final second = viewModel.tasks.restartable(
         key: 'search',
         (task) async {},
       );
@@ -410,13 +478,13 @@ void main() {
       final viewModel = _TestViewModel();
       final gate = Completer<void>();
 
-      final first = viewModel.execute.restartable(key: 'search', (task) async {
+      final first = viewModel.tasks.restartable(key: 'search', (task) async {
         await gate.future;
         throw StateError('failed after cancellation');
       });
       final firstResult = expectLater(first, throwsStateError);
 
-      await viewModel.execute.restartable(key: 'search', (task) async {});
+      await viewModel.tasks.restartable(key: 'search', (task) async {});
       gate.complete();
 
       await firstResult;
@@ -426,11 +494,11 @@ void main() {
       final viewModel = _TestViewModel();
       final gate = Completer<void>();
 
-      final first = viewModel.execute.restartable(key: 'load', (task) async {
+      final first = viewModel.tasks.restartable(key: 'load', (task) async {
         await gate.future;
         task.updateState((_) => 1);
       });
-      await viewModel.execute.restartable(key: 'load', (task) async {
+      await viewModel.tasks.restartable(key: 'load', (task) async {
         task.updateState((_) => 2);
       });
 
@@ -445,11 +513,11 @@ void main() {
       final effects = <String>[];
       viewModel.effects.listen(effects.add);
 
-      final first = viewModel.execute.restartable(key: 'load', (task) async {
+      final first = viewModel.tasks.restartable(key: 'load', (task) async {
         await gate.future;
         viewModel.emit('old');
       });
-      await viewModel.execute.restartable(key: 'load', (task) async {
+      await viewModel.tasks.restartable(key: 'load', (task) async {
         viewModel.emit('new');
       });
 
@@ -465,12 +533,12 @@ void main() {
       final secondGate = Completer<void>();
       final events = <String>[];
 
-      final first = viewModel.execute.sequential(key: 'save', (task) async {
+      final first = viewModel.tasks.sequential(key: 'save', (task) async {
         events.add('first:start');
         await firstGate.future;
         events.add('first:end');
       });
-      final second = viewModel.execute.sequential(key: 'save', (task) async {
+      final second = viewModel.tasks.sequential(key: 'save', (task) async {
         events.add('second:start');
         await secondGate.future;
         events.add('second:end');
@@ -493,13 +561,13 @@ void main() {
 
     test('sequential continues after an invocation fails', () async {
       final viewModel = _TestViewModel();
-      final first = viewModel.execute.sequential(
+      final first = viewModel.tasks.sequential(
         key: 'save',
         (task) async => throw ArgumentError('failed'),
       );
       final firstResult = expectLater(first, throwsArgumentError);
 
-      final second = viewModel.execute.sequential(
+      final second = viewModel.tasks.sequential(
         key: 'save',
         (task) async {},
       );
@@ -512,23 +580,19 @@ void main() {
       final viewModel = _TestViewModel();
       Future<void> syncThrow(TaskContext _) => throw StateError('sync');
 
-      final callable = viewModel.execute(syncThrow, key: 'call');
+      final callable = viewModel.tasks(syncThrow, key: 'call');
       expect(callable, isA<Future<void>>());
       await expectLater(callable, throwsStateError);
 
-      final concurrent = viewModel.execute.concurrent(syncThrow, key: 'c');
-      expect(concurrent, isA<Future<void>>());
-      await expectLater(concurrent, throwsStateError);
-
-      final sequential = viewModel.execute.sequential(syncThrow, key: 's');
+      final sequential = viewModel.tasks.sequential(syncThrow, key: 's');
       expect(sequential, isA<Future<void>>());
       await expectLater(sequential, throwsStateError);
 
-      final droppable = viewModel.execute.droppable(syncThrow, key: 'd');
+      final droppable = viewModel.tasks.droppable(syncThrow, key: 'd');
       expect(droppable, isA<Future<void>>());
       await expectLater(droppable, throwsStateError);
 
-      final restartable = viewModel.execute.restartable(syncThrow, key: 'r');
+      final restartable = viewModel.tasks.restartable(syncThrow, key: 'r');
       expect(restartable, isA<Future<void>>());
       await expectLater(restartable, throwsStateError);
     });
@@ -537,23 +601,23 @@ void main() {
       final viewModel = _TestViewModel();
       var ran = 0;
       await expectLater(
-        viewModel.execute.sequential(
+        viewModel.tasks.sequential(
           key: 's',
           (task) => throw StateError('sync'),
         ),
         throwsStateError,
       );
-      await viewModel.execute.sequential(key: 's', (task) async => ran++);
+      await viewModel.tasks.sequential(key: 's', (task) async => ran++);
       await expectLater(
-        viewModel.execute.droppable(key: 'd', (task) => throw StateError('sync')),
+        viewModel.tasks.droppable(key: 'd', (task) => throw StateError('sync')),
         throwsStateError,
       );
-      await viewModel.execute.droppable(key: 'd', (task) async => ran++);
+      await viewModel.tasks.droppable(key: 'd', (task) async => ran++);
       await expectLater(
-        viewModel.execute.restartable(key: 'r', (task) => throw StateError('sync')),
+        viewModel.tasks.restartable(key: 'r', (task) => throw StateError('sync')),
         throwsStateError,
       );
-      await viewModel.execute.restartable(key: 'r', (task) async => ran++);
+      await viewModel.tasks.restartable(key: 'r', (task) async => ran++);
       expect(ran, 3);
     });
 
@@ -562,11 +626,11 @@ void main() {
       final gate = Completer<void>();
       late TaskContext activeContext;
 
-      final active = viewModel.execute.sequential(key: 'save', (task) async {
+      final active = viewModel.tasks.sequential(key: 'save', (task) async {
         activeContext = task;
         await gate.future;
       });
-      final queued = viewModel.execute.sequential(key: 'save', (task) async {});
+      final queued = viewModel.tasks.sequential(key: 'save', (task) async {});
       final activeResult = expectLater(active, completes);
       final queuedResult = expectLater(queued, completes);
 
@@ -576,20 +640,20 @@ void main() {
       gate.complete();
       await activeResult;
       await queuedResult;
-      await expectLater(viewModel.execute((task) async {}), completes);
+      await expectLater(viewModel.tasks((task) async {}), completes);
     });
 
     test('disposal skips multiple queued sequential blocks', () async {
       final viewModel = _TestViewModel();
       final gate = Completer<void>();
       var ran = 0;
-      final active = viewModel.execute.sequential(key: 'save', (task) async {
+      final active = viewModel.tasks.sequential(key: 'save', (task) async {
         await gate.future;
       });
       final queued = [
-        viewModel.execute.sequential(key: 'save', (task) async => ran++),
-        viewModel.execute.sequential(key: 'save', (task) async => ran++),
-        viewModel.execute.sequential(key: 'save', (task) async => ran++),
+        viewModel.tasks.sequential(key: 'save', (task) async => ran++),
+        viewModel.tasks.sequential(key: 'save', (task) async => ran++),
+        viewModel.tasks.sequential(key: 'save', (task) async => ran++),
       ];
       viewModel.dispose();
       gate.complete();
@@ -603,19 +667,19 @@ void main() {
       final gates = List.generate(4, (_) => Completer<void>());
       final contexts = <TaskContext>[];
       final futures = <Future<void>>[
-        viewModel.execute.concurrent((task) async {
+        viewModel.tasks((task) async {
           contexts.add(task);
           await gates[0].future;
         }, key: 'c'),
-        viewModel.execute.sequential((task) async {
+        viewModel.tasks.sequential((task) async {
           contexts.add(task);
           await gates[1].future;
         }, key: 's'),
-        viewModel.execute.droppable((task) async {
+        viewModel.tasks.droppable((task) async {
           contexts.add(task);
           await gates[2].future;
         }, key: 'd'),
-        viewModel.execute.restartable((task) async {
+        viewModel.tasks.restartable((task) async {
           contexts.add(task);
           await gates[3].future;
         }, key: 'r'),
@@ -636,7 +700,7 @@ void main() {
       final viewModel = _TestViewModel();
       final gate = Completer<void>();
       late TaskContext context;
-      final future = viewModel.execute.concurrent((task) async {
+      final future = viewModel.tasks((task) async {
         context = task;
         await gate.future;
       });
@@ -655,12 +719,12 @@ void main() {
       final viewModel = _TestViewModel();
       final gate = Completer<void>();
       late TaskContext context;
-      final first = viewModel.execute.restartable(key: 'r', (task) async {
+      final first = viewModel.tasks.restartable(key: 'r', (task) async {
         context = task;
         await gate.future;
         task.throwIfCancelled();
       });
-      final replacement = viewModel.execute.restartable(key: 'r', (task) async {});
+      final replacement = viewModel.tasks.restartable(key: 'r', (task) async {});
       await context.cancelled;
       await replacement;
       gate.complete();
@@ -672,12 +736,12 @@ void main() {
       final viewModel = _TestViewModel();
       late TaskContext context;
       var resumed = false;
-      final first = viewModel.execute.restartable(key: 'await-cancel', (task) async {
+      final first = viewModel.tasks.restartable(key: 'await-cancel', (task) async {
         context = task;
         await task.cancelled;
         resumed = true;
       });
-      await viewModel.execute.restartable(key: 'await-cancel', (task) async {});
+      await viewModel.tasks.restartable(key: 'await-cancel', (task) async {});
       await context.cancelled;
       await first;
       expect(resumed, isTrue);
@@ -687,12 +751,12 @@ void main() {
       final viewModel = _TestViewModel();
       final release = Completer<void>();
       late TaskContext context;
-      final first = viewModel.execute.restartable(key: 'separate-cancel', (task) async {
+      final first = viewModel.tasks.restartable(key: 'separate-cancel', (task) async {
         context = task;
         await release.future;
         throw const TaskCancelledException('constructed by the block');
       });
-      await viewModel.execute.restartable(key: 'separate-cancel', (task) async {});
+      await viewModel.tasks.restartable(key: 'separate-cancel', (task) async {});
       await context.cancelled;
       release.complete();
       await first;
@@ -701,13 +765,13 @@ void main() {
     test('uncancelled cancellation exception and post-disposal errors propagate', () async {
       final viewModel = _TestViewModel();
       await expectLater(
-        viewModel.execute.concurrent(
+        viewModel.tasks(
           (task) async => throw const TaskCancelledException(),
         ),
         throwsA(isA<TaskCancelledException>()),
       );
       final gate = Completer<void>();
-      final future = viewModel.execute.concurrent((task) async {
+      final future = viewModel.tasks((task) async {
         await gate.future;
         throw StateError('after disposal');
       });
@@ -720,11 +784,10 @@ void main() {
       final viewModel = _TestViewModel()..dispose();
       var ran = 0;
       final futures = [
-        viewModel.execute((task) async => ran++),
-        viewModel.execute.concurrent((task) async => ran++),
-        viewModel.execute.sequential(key: 's', (task) async => ran++),
-        viewModel.execute.droppable(key: 'd', (task) async => ran++),
-        viewModel.execute.restartable(key: 'r', (task) async => ran++),
+        viewModel.tasks((task) async => ran++),
+        viewModel.tasks.sequential(key: 's', (task) async => ran++),
+        viewModel.tasks.droppable(key: 'd', (task) async => ran++),
+        viewModel.tasks.restartable(key: 'r', (task) async => ran++),
       ];
       await Future.wait(futures);
       expect(ran, 0);
@@ -767,11 +830,11 @@ void main() {
       final concurrentGate = Completer<void>();
       var ownedEntered = false;
       var concurrentEntered = false;
-      final owned = viewModel.execute.sequential(key: 'coexist', (task) async {
+      final owned = viewModel.tasks.sequential(key: 'coexist', (task) async {
         ownedEntered = true;
         await ownedGate.future;
       });
-      final concurrent = viewModel.execute.concurrent((task) async {
+      final concurrent = viewModel.tasks((task) async {
         concurrentEntered = true;
         await concurrentGate.future;
       }, key: 'coexist');
@@ -785,11 +848,11 @@ void main() {
       final droppableGate = Completer<void>();
       var sequentialEntered = false;
       var droppableEntered = false;
-      final distinctSequential = viewModel.execute.sequential(key: 'sequential-key', (task) async {
+      final distinctSequential = viewModel.tasks.sequential(key: 'sequential-key', (task) async {
         sequentialEntered = true;
         await sequentialGate.future;
       });
-      final distinctDroppable = viewModel.execute.droppable(key: 'droppable-key', (task) async {
+      final distinctDroppable = viewModel.tasks.droppable(key: 'droppable-key', (task) async {
         droppableEntered = true;
         await droppableGate.future;
       });
@@ -804,7 +867,7 @@ void main() {
       final viewModel = _TestViewModel();
       final resume = Completer<void>();
       var callbackCount = 0;
-      final first = viewModel.execute.restartable(key: 'effect', (task) async {
+      final first = viewModel.tasks.restartable(key: 'effect', (task) async {
         await resume.future;
         try {
           task.ensureActive();
@@ -813,7 +876,7 @@ void main() {
           // The callback is deliberately after the activity check.
         }
       });
-      await viewModel.execute.restartable(key: 'effect', (task) async {});
+      await viewModel.tasks.restartable(key: 'effect', (task) async {});
       resume.complete();
       await first;
       expect(callbackCount, 0);
@@ -836,15 +899,16 @@ Future<void> _startPolicy(
   }
 
   return switch (policy) {
-    TaskPolicy.concurrent => viewModel.execute.concurrent(block, key: key),
-    TaskPolicy.sequential => viewModel.execute.sequential(block, key: key),
-    TaskPolicy.droppable => viewModel.execute.droppable(block, key: key),
-    TaskPolicy.restartable => viewModel.execute.restartable(block, key: key),
+    TaskPolicy.concurrent => viewModel.tasks(block, key: key),
+    TaskPolicy.sequential => viewModel.tasks.sequential(block, key: key),
+    TaskPolicy.droppable => viewModel.tasks.droppable(block, key: key),
+    TaskPolicy.restartable => viewModel.tasks.restartable(block, key: key),
   };
 }
 
 final class _TestViewModel extends ViewModel<int> {
   _TestViewModel() : super(0);
+  TaskExecutor<int> get tasks => execute;
   late final MutableEffects<String> _effects = effectsOf();
 
   Effects<String> get effects => _effects;
@@ -862,6 +926,7 @@ final class _TestViewModel extends ViewModel<int> {
 
 final class _LifecycleViewModel extends ViewModel<int> {
   _LifecycleViewModel({this.throwOnDispose = false}) : super(0);
+  TaskExecutor<int> get tasks => execute;
 
   final bool throwOnDispose;
   late final MutableEffects<String> _effects = effectsOf();

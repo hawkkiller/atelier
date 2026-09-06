@@ -45,7 +45,8 @@ final class TaskCancelledException implements Exception {
 }
 
 abstract interface class TaskExecutor<S extends Object> {
-  /// Runs [block] as an Atelier task.
+  /// Runs [block] independently as a concurrent Atelier task.
+  /// [key] is metadata only; these calls may coexist with any keyed lane.
   ///
   /// All entry points return a [Future], including when [block] throws
   /// synchronously. Calls made after disposal complete normally without
@@ -60,13 +61,6 @@ abstract interface class TaskExecutor<S extends Object> {
   /// Other errors propagate unchanged, including errors raised after
   /// cancellation.
   Future<void> call(Future<void> Function(TaskContext<S> task) block, {Object? key});
-
-  /// Runs independently. [key] is metadata only, so concurrent invocations
-  /// can coexist with each other and with an owned keyed lane.
-  Future<void> concurrent(
-    Future<void> Function(TaskContext<S> task) block, {
-    Object? key,
-  });
 
   /// Queues calls in order for [key]. Sequential, droppable, and restartable
   /// invocations own a keyed lane; concurrent invocations can coexist with
@@ -105,14 +99,6 @@ final class AtelierTaskExecutor<S extends Object> implements TaskExecutor<S> {
 
   @override
   Future<void> call(Future<void> Function(TaskContext<S> task) block, {Object? key}) {
-    return concurrent(block, key: key);
-  }
-
-  @override
-  Future<void> concurrent(
-    Future<void> Function(TaskContext<S> task) block, {
-    Object? key,
-  }) {
     _checkAllowed();
     if (_isDisposed) {
       return _disposedFuture();
@@ -141,7 +127,9 @@ final class AtelierTaskExecutor<S extends Object> implements TaskExecutor<S> {
     final lane = _TaskLane<S>(TaskPolicy.droppable);
     _lanes[key] = lane;
     final context = _TaskContext<S>(key: key, policy: TaskPolicy.droppable, update: _updateState);
-    final future = _run(context, block);
+    final completer = Completer<void>();
+    final future = completer.future;
+    // Publish the lane before user code can synchronously re-enter it.
     lane.activeFuture = future;
     unawaited(
       future
@@ -152,6 +140,7 @@ final class AtelierTaskExecutor<S extends Object> implements TaskExecutor<S> {
           })
           .then<void>((_) {}, onError: (_, _) {}),
     );
+    completer.complete(_run(context, block));
     return future;
   }
 
@@ -178,7 +167,8 @@ final class AtelierTaskExecutor<S extends Object> implements TaskExecutor<S> {
     final lane = existing ?? _TaskLane<S>(TaskPolicy.restartable);
     _lanes[key] = lane;
     final context = _TaskContext<S>(key: key, policy: TaskPolicy.restartable, update: _updateState);
-    final future = _run(context, block);
+    final completer = Completer<void>();
+    final future = completer.future;
     lane
       ..activeContext = context
       ..activeFuture = future;
@@ -197,6 +187,7 @@ final class AtelierTaskExecutor<S extends Object> implements TaskExecutor<S> {
           })
           .then<void>((_) {}, onError: (_, _) {}),
     );
+    completer.complete(_run(context, block));
     return future;
   }
 
@@ -249,7 +240,7 @@ final class AtelierTaskExecutor<S extends Object> implements TaskExecutor<S> {
 
     final invocation = lane.queue.removeAt(0);
     final context = _TaskContext<S>(key: key, policy: TaskPolicy.sequential, update: _updateState);
-    final future = invocation.run(this, context);
+    final future = invocation.completer.future;
     lane
       ..activeContext = context
       ..activeFuture = future;
@@ -273,6 +264,7 @@ final class AtelierTaskExecutor<S extends Object> implements TaskExecutor<S> {
           })
           .then<void>((_) {}, onError: (_, _) {}),
     );
+    invocation.completer.complete(_run(context, invocation.block));
   }
 
   void _requirePolicy(_TaskLane<S> lane, TaskPolicy expectedPolicy) {
@@ -381,19 +373,6 @@ final class _SequentialInvocation<S extends Object> {
 
   final Future<void> Function(TaskContext<S> task) block;
   final Completer<void> completer = Completer<void>();
-
-  Future<void> run(AtelierTaskExecutor<S> executor, _TaskContext<S> context) {
-    final future = executor._run(context, block);
-    unawaited(
-      future.then<void>(
-        (_) => completer.complete(),
-        onError: (Object error, StackTrace stackTrace) {
-          completer.completeError(error, stackTrace);
-        },
-      ),
-    );
-    return future;
-  }
 
   void cancel(TaskCancelledException exception) {
     if (!completer.isCompleted) {

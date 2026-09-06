@@ -20,6 +20,9 @@ abstract class ViewModel<S extends Object> {
   bool _inReducer = false;
 
   StateValue<S> get state => _state;
+
+  /// Runs work owned by this ViewModel. Expose application actions as methods.
+  @protected
   TaskExecutor<S> get execute => _executor;
   bool get isDisposed => _isDisposed;
 

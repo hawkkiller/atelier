@@ -60,6 +60,7 @@ abstract class ViewModel<S extends Object> {
   ViewModel(S initialState);
 
   StateValue<S> get state;
+  @protected
   TaskExecutor<S> get execute;
   bool get isDisposed;
 
@@ -224,11 +225,6 @@ Public API:
 abstract interface class TaskExecutor<S extends Object> {
   Future<void> call(Future<void> Function(TaskContext<S> task) block, {Object? key});
 
-  Future<void> concurrent(
-    Future<void> Function(TaskContext<S> task) block, {
-    Object? key,
-  });
-
   Future<void> sequential(
     Future<void> Function(TaskContext<S> task) block, {
     required Object key,
@@ -265,7 +261,6 @@ available as discoverable methods on the same executor:
 
 ```dart
 execute(...);             // concurrent
-execute.concurrent(...);  // explicit concurrent
 execute.sequential(...);
 execute.droppable(...);
 execute.restartable(...);
@@ -381,11 +376,16 @@ Public API:
 mixin AtelierVmMixin<VM extends ViewModel<Object>, W extends StatefulWidget>
     on State<W>
     implements AtelierStateBindings {
+  Widget view(BuildContext context);
+
   VM createViewModel(BuildContext context);
 
   VM get viewModel;
 }
 ```
+
+Override `view(BuildContext context)` instead of `build()`. The mixins own
+`build()` and clean up unused watches in `finally` after each view.
 
 The mixin creates the ViewModel once, exposes it through `viewModel`, provides
 the state binding and auto-dispose APIs described below, and disposes the
@@ -420,7 +420,7 @@ class _LoginState extends State<LoginScreen>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     final state = watch(viewModel.state);
 
     return Column(
@@ -451,6 +451,8 @@ Public API:
 ```dart
 mixin AtelierAutoDisposeMixin<W extends StatefulWidget> on State<W>
     implements AtelierStateBindings {
+  Widget view(BuildContext context);
+
   T disposeWith<T>(T value, void Function(T value) dispose);
 
   TextEditingController textController({String? text});
@@ -501,7 +503,7 @@ class _EmailFieldSectionState extends State<EmailFieldSection>
   late final focus = focusNode();
 
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     return TextField(controller: controller, focusNode: focus);
   }
 }
@@ -786,7 +788,7 @@ Recommended MVP:
 2. `StateValue<S>` with task-owned updates;
 3. `Effects<E>` / `MutableEffects<E>`;
 4. callable `TaskExecutor` with `TaskContext`;
-5. `execute()` / `execute.concurrent()`;
+5. `execute()`;
 6. `execute.droppable()`;
 7. `execute.restartable()`;
 8. `execute.sequential()`;
@@ -987,7 +989,7 @@ class _LoginState extends State<LoginScreen>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     final state = watch(viewModel.state);
 
     return LoginView(

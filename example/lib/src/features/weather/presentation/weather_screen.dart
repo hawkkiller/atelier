@@ -35,7 +35,7 @@ class _WeatherScreenState extends State<WeatherScreen> with AtelierVmMixin<Weath
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     final snapshot = watchSelect(
       viewModel.state,
       (state) => (
@@ -343,7 +343,7 @@ class _WeatherSearchScreenState extends State<WeatherSearchScreen>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     final search = watchSelect(
       viewModel.state,
       (state) => (suggestions: state.suggestions, status: state.searchStatus),

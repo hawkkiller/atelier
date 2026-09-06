@@ -93,7 +93,7 @@ class _SearchScreenState extends State<SearchScreen>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget view(BuildContext context) {
     final state = watch(viewModel.state);
     return SearchView(state: state);
   }
@@ -132,3 +132,17 @@ keyless Open-Meteo geocoding and forecast APIs:
 cd example
 flutter run
 ```
+
+### Migrating to `view`
+
+Both Atelier mixins now own `build()`. Rename your override from
+`Widget build(BuildContext context)` to `Widget view(BuildContext context)`.
+Do not override `build()` or call it directly. Call `watch` and `watchSelect`
+synchronously from `view()` (or helpers it invokes), not from event callbacks
+or deferred child builders such as `LayoutBuilder.builder`.
+Unused watches are removed when `view()` exits, including when it throws.
+
+`execute` is protected: widgets call application methods such as
+`viewModel.search(query)`. Inside a ViewModel, use `execute(...)` for concurrent
+work, or `execute.sequential`, `execute.droppable`, and `execute.restartable`
+for keyed policies. The former `execute.concurrent(...)` alias is removed.

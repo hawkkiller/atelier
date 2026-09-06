@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
+import 'package:meta/meta.dart' show nonVirtual;
 
 import 'effects.dart';
 import 'state_value.dart';
@@ -10,12 +11,12 @@ import 'view_model.dart';
 abstract interface class AtelierStateBindings {
   /// Returns the current value and rebuilds this [State] for every update.
   ///
-  /// Call this method from [State.build].
+  /// Call this method during the owning mixin's `view` method.
   T watch<T>(StateValue<T> state);
 
   /// Returns a selected value and rebuilds when that selection changes.
   ///
-  /// Call this method from [State.build]. By default, selections are compared
+  /// Call this method during the owning mixin's `view` method. By default, selections are compared
   /// with `==`.
   R watchSelect<T, R>(
     StateValue<T> state,
@@ -85,25 +86,18 @@ mixin AtelierAutoDisposeMixin<W extends StatefulWidget> on State<W> implements A
     );
   }
 
-  @override
-  @mustCallSuper
-  void setState(VoidCallback fn) {
-    super.setState(fn);
-    _atelierLifecycle.beginWatchCycle(afterBuild: true);
-  }
+  /// Builds the widget tree. Call watch/watchSelect here, not in deferred builders.
+  Widget view(BuildContext context);
 
   @override
-  @mustCallSuper
-  void didUpdateWidget(covariant W oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _atelierLifecycle.beginWatchCycle(afterBuild: true);
-  }
-
-  @override
-  @mustCallSuper
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _atelierLifecycle.beginWatchCycle(afterBuild: true);
+  @nonVirtual
+  Widget build(BuildContext context) {
+    _atelierLifecycle.beginBuild();
+    try {
+      return view(context);
+    } finally {
+      _atelierLifecycle.endBuild();
+    }
   }
 
   @override
@@ -211,25 +205,18 @@ mixin AtelierVmMixin<VM extends ViewModel<Object>, W extends StatefulWidget> on 
     );
   }
 
-  @override
-  @mustCallSuper
-  void setState(VoidCallback fn) {
-    super.setState(fn);
-    _atelierLifecycle.beginWatchCycle(afterBuild: true);
-  }
+  /// Builds the widget tree. Call watch/watchSelect here, not in deferred builders.
+  Widget view(BuildContext context);
 
   @override
-  @mustCallSuper
-  void didUpdateWidget(covariant W oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _atelierLifecycle.beginWatchCycle(afterBuild: true);
-  }
-
-  @override
-  @mustCallSuper
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _atelierLifecycle.beginWatchCycle(afterBuild: true);
+  @nonVirtual
+  Widget build(BuildContext context) {
+    _atelierLifecycle.beginBuild();
+    try {
+      return view(context);
+    } finally {
+      _atelierLifecycle.endBuild();
+    }
   }
 
   @override
@@ -288,7 +275,7 @@ final class _AtelierStateLifecycle {
   final List<void Function()> _resourceDisposers = [];
 
   int _watchCursor = 0;
-  bool _watchCycleScheduled = false;
+  bool _isBuilding = false;
   bool _bindingsDisposed = false;
   bool _resourcesDisposed = false;
 
@@ -318,7 +305,9 @@ final class _AtelierStateLifecycle {
     bool Function(R previous, R next) equals,
   ) {
     _ensureBindingsActive();
-    beginWatchCycle();
+    if (!_isBuilding) {
+      throw StateError('watch and watchSelect must be called during view().');
+    }
 
     final index = _watchCursor++;
     final selected = select(state.value);
@@ -359,35 +348,23 @@ final class _AtelierStateLifecycle {
     return selected;
   }
 
-  void beginWatchCycle({bool afterBuild = false}) {
+  void beginBuild() {
     _ensureBindingsActive();
-    if (_watchCycleScheduled) {
-      return;
-    }
-    _watchCycleScheduled = true;
-    void cleanup() {
-      if (_bindingsDisposed) {
-        return;
-      }
+    if (_isBuilding) throw StateError('Cannot re-enter view().');
+    _isBuilding = true;
+    _watchCursor = 0;
+  }
 
-      while (_watchSlots.length > _watchCursor) {
-        _ignoreCancel(_watchSlots.removeLast().cancel());
-      }
-      _watchCursor = 0;
-      _watchCycleScheduled = false;
+  void endBuild() {
+    while (_watchSlots.length > _watchCursor) {
+      _ignoreCancel(_watchSlots.removeLast().cancel());
     }
-
-    if (afterBuild) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => cleanup());
-    } else {
-      scheduleMicrotask(cleanup);
-    }
+    _isBuilding = false;
   }
 
   void _requestRebuild() {
     if (!_bindingsDisposed && _isMounted()) {
       _rebuild();
-      beginWatchCycle(afterBuild: true);
     }
   }
 
