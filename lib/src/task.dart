@@ -291,7 +291,7 @@ final class AtelierTaskExecutor<S extends Object> implements TaskExecutor<S> {
     }
     for (final lane in _lanes.values) {
       for (final invocation in lane.queue) {
-        invocation.cancel(cancellation);
+        invocation.cancel();
       }
       lane.queue.clear();
     }
@@ -321,9 +321,6 @@ final class _TaskContext<S extends Object> implements TaskContext<S>, AtelierTas
 
   @override
   Future<void> get cancelled => _cancelled.future;
-
-  TaskCancelledException get cancellationException =>
-      _cancellationException ?? const TaskCancelledException('The task is no longer active.');
 
   @override
   void throwIfCancelled() {
@@ -374,7 +371,7 @@ final class _SequentialInvocation<S extends Object> {
   final Future<void> Function(TaskContext<S> task) block;
   final Completer<void> completer = Completer<void>();
 
-  void cancel(TaskCancelledException exception) {
+  void cancel() {
     if (!completer.isCompleted) {
       completer.complete();
     }

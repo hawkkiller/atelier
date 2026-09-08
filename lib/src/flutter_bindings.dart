@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:meta/meta.dart' show nonVirtual;
 
+import 'dispose.dart';
 import 'effects.dart';
 import 'state_value.dart';
 import 'view_model.dart';
@@ -32,6 +33,9 @@ abstract interface class AtelierStateBindings {
   ///
   /// The subscription is cancelled automatically during [State.dispose].
   void listen<E>(Effects<E> effects, void Function(E effect) listener);
+
+  /// Registers a resource for disposal with the owning State.
+  T disposeWith<T>(T value, void Function(T value) dispose);
 }
 
 /// Adds state/effect bindings and automatic resource disposal to a [State].
@@ -58,32 +62,9 @@ mixin AtelierAutoDisposeMixin<W extends StatefulWidget> on State<W> implements A
     _atelierLifecycle.listen(effects, listener);
   }
 
+  @override
   T disposeWith<T>(T value, void Function(T value) dispose) {
     return _atelierLifecycle.disposeWith(value, dispose);
-  }
-
-  TextEditingController textController({String? text}) {
-    return disposeWith(
-      TextEditingController(text: text),
-      (controller) => controller.dispose(),
-    );
-  }
-
-  FocusNode focusNode() {
-    return disposeWith(FocusNode(), (node) => node.dispose());
-  }
-
-  ScrollController scrollController({
-    double initialScrollOffset = 0,
-    bool keepScrollOffset = true,
-  }) {
-    return disposeWith(
-      ScrollController(
-        initialScrollOffset: initialScrollOffset,
-        keepScrollOffset: keepScrollOffset,
-      ),
-      (controller) => controller.dispose(),
-    );
   }
 
   /// Builds the widget tree. Call watch/watchSelect here, not in deferred builders.
@@ -103,25 +84,7 @@ mixin AtelierAutoDisposeMixin<W extends StatefulWidget> on State<W> implements A
   @override
   @mustCallSuper
   void dispose() {
-    Object? error;
-    StackTrace? stackTrace;
-    try {
-      _atelierLifecycle.dispose();
-    } catch (caughtError, caughtStackTrace) {
-      error = caughtError;
-      stackTrace = caughtStackTrace;
-    }
-
-    try {
-      super.dispose();
-    } catch (caughtError, caughtStackTrace) {
-      error ??= caughtError;
-      stackTrace ??= caughtStackTrace;
-    }
-
-    if (error != null) {
-      Error.throwWithStackTrace(error, stackTrace!);
-    }
+    disposeAll([_atelierLifecycle.dispose, super.dispose]);
   }
 }
 
@@ -177,10 +140,39 @@ mixin AtelierVmMixin<VM extends ViewModel<Object>, W extends StatefulWidget> on 
     _atelierLifecycle.listen(effects, listener);
   }
 
+  @override
   T disposeWith<T>(T value, void Function(T value) dispose) {
     return _atelierLifecycle.disposeWith(value, dispose);
   }
 
+  /// Builds the widget tree. Call watch/watchSelect here, not in deferred builders.
+  Widget view(BuildContext context);
+
+  @override
+  @nonVirtual
+  Widget build(BuildContext context) {
+    _atelierLifecycle.beginBuild();
+    try {
+      return view(context);
+    } finally {
+      _atelierLifecycle.endBuild();
+    }
+  }
+
+  @override
+  @mustCallSuper
+  void dispose() {
+    disposeAll([
+      _atelierLifecycle.disposeBindings,
+      if (_atelierViewModelCreated) _atelierViewModel.dispose,
+      _atelierLifecycle.disposeResources,
+      super.dispose,
+    ]);
+  }
+}
+
+/// Convenience constructors for resources owned by an Atelier State.
+extension AtelierStateResources on AtelierStateBindings {
   TextEditingController textController({String? text}) {
     return disposeWith(
       TextEditingController(text: text),
@@ -203,61 +195,6 @@ mixin AtelierVmMixin<VM extends ViewModel<Object>, W extends StatefulWidget> on 
       ),
       (controller) => controller.dispose(),
     );
-  }
-
-  /// Builds the widget tree. Call watch/watchSelect here, not in deferred builders.
-  Widget view(BuildContext context);
-
-  @override
-  @nonVirtual
-  Widget build(BuildContext context) {
-    _atelierLifecycle.beginBuild();
-    try {
-      return view(context);
-    } finally {
-      _atelierLifecycle.endBuild();
-    }
-  }
-
-  @override
-  @mustCallSuper
-  void dispose() {
-    Object? error;
-    StackTrace? stackTrace;
-
-    try {
-      _atelierLifecycle.disposeBindings();
-    } catch (caughtError, caughtStackTrace) {
-      error = caughtError;
-      stackTrace = caughtStackTrace;
-    }
-
-    if (_atelierViewModelCreated) {
-      try {
-        _atelierViewModel.dispose();
-      } catch (caughtError, caughtStackTrace) {
-        error ??= caughtError;
-        stackTrace ??= caughtStackTrace;
-      }
-    }
-
-    try {
-      _atelierLifecycle.disposeResources();
-    } catch (caughtError, caughtStackTrace) {
-      error ??= caughtError;
-      stackTrace ??= caughtStackTrace;
-    }
-
-    try {
-      super.dispose();
-    } catch (caughtError, caughtStackTrace) {
-      error ??= caughtError;
-      stackTrace ??= caughtStackTrace;
-    }
-
-    if (error != null) {
-      Error.throwWithStackTrace(error, stackTrace!);
-    }
   }
 }
 
@@ -340,7 +277,7 @@ final class _AtelierStateLifecycle {
     if (index < _watchSlots.length) {
       final replaced = _watchSlots[index];
       _watchSlots[index] = slot;
-      _ignoreCancel(replaced.cancel());
+      replaced.cancel().ignore();
     } else {
       _watchSlots.add(slot);
     }
@@ -357,7 +294,7 @@ final class _AtelierStateLifecycle {
 
   void endBuild() {
     while (_watchSlots.length > _watchCursor) {
-      _ignoreCancel(_watchSlots.removeLast().cancel());
+      _watchSlots.removeLast().cancel().ignore();
     }
     _isBuilding = false;
   }
@@ -394,23 +331,7 @@ final class _AtelierStateLifecycle {
   }
 
   void dispose() {
-    Object? error;
-    StackTrace? stackTrace;
-    try {
-      disposeBindings();
-    } catch (caughtError, caughtStackTrace) {
-      error = caughtError;
-      stackTrace = caughtStackTrace;
-    }
-    try {
-      disposeResources();
-    } catch (caughtError, caughtStackTrace) {
-      error ??= caughtError;
-      stackTrace ??= caughtStackTrace;
-    }
-    if (error != null) {
-      Error.throwWithStackTrace(error, stackTrace!);
-    }
+    disposeAll([disposeBindings, disposeResources]);
   }
 
   void disposeBindings() {
@@ -420,12 +341,12 @@ final class _AtelierStateLifecycle {
     _bindingsDisposed = true;
 
     for (final slot in _watchSlots) {
-      _ignoreCancel(slot.cancel());
+      slot.cancel().ignore();
     }
     _watchSlots.clear();
 
     for (final entry in _effectSubscriptions) {
-      _ignoreCancel(entry.subscription.cancel());
+      entry.subscription.cancel().ignore();
     }
     _effectSubscriptions.clear();
   }
@@ -436,20 +357,10 @@ final class _AtelierStateLifecycle {
     }
     _resourcesDisposed = true;
 
-    Object? error;
-    StackTrace? stackTrace;
-    for (final dispose in _resourceDisposers.reversed) {
-      try {
-        dispose();
-      } catch (caughtError, caughtStackTrace) {
-        error ??= caughtError;
-        stackTrace ??= caughtStackTrace;
-      }
-    }
-    _resourceDisposers.clear();
-
-    if (error != null) {
-      Error.throwWithStackTrace(error, stackTrace!);
+    try {
+      disposeAll(_resourceDisposers.reversed);
+    } finally {
+      _resourceDisposers.clear();
     }
   }
 
@@ -459,8 +370,6 @@ final class _AtelierStateLifecycle {
     }
   }
 }
-
-void _ignoreCancel(Future<void> cancel) => cancel.ignore();
 
 final class _WatchSlot {
   _WatchSlot({

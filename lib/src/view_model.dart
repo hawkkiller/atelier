@@ -1,4 +1,5 @@
 import 'package:meta/meta.dart';
+import 'dispose.dart';
 import 'effects.dart';
 import 'state_value.dart';
 import 'task.dart';
@@ -59,25 +60,11 @@ abstract class ViewModel<S extends Object> {
     if (_inReducer) throw StateError('Cannot dispose a ViewModel from a state reducer.');
     _isDisposed = true;
     _executor.dispose();
-    Object? error;
-    StackTrace? stackTrace;
     try {
-      onDispose();
-    } catch (e, s) {
-      error = e;
-      stackTrace = s;
+      disposeAll([onDispose, _state.close, ..._ownedResources.reversed]);
+    } finally {
+      _ownedResources.clear();
     }
-    _state.close();
-    for (final close in _ownedResources.reversed) {
-      try {
-        close();
-      } catch (e, s) {
-        error ??= e;
-        stackTrace ??= s;
-      }
-    }
-    _ownedResources.clear();
-    if (error != null) Error.throwWithStackTrace(error, stackTrace!);
   }
 
   @protected

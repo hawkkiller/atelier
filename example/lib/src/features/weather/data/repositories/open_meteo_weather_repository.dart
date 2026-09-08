@@ -142,46 +142,19 @@ class OpenMeteoWeatherRepository implements WeatherRepository {
     return location.country.isEmpty ? location.name : '${location.name}, ${location.country}';
   }
 
-  _WeatherConditionMapping _conditionFor(int code) {
+  ({WeatherCondition condition, String description}) _conditionFor(int code) {
     return switch (code) {
-      0 => const _WeatherConditionMapping(WeatherCondition.clear, 'Clear sky'),
-      1 || 2 => const _WeatherConditionMapping(
-        WeatherCondition.partlyCloudy,
-        'Partly cloudy',
-      ),
-      3 => const _WeatherConditionMapping(
-        WeatherCondition.overcast,
-        'Overcast',
-      ),
-      45 || 48 => const _WeatherConditionMapping(WeatherCondition.fog, 'Foggy'),
-      >= 51 && <= 57 => const _WeatherConditionMapping(
-        WeatherCondition.drizzle,
-        'Drizzle',
-      ),
-      >= 61 && <= 67 => const _WeatherConditionMapping(
-        WeatherCondition.rain,
-        'Rain',
-      ),
-      >= 71 && <= 77 => const _WeatherConditionMapping(
-        WeatherCondition.snow,
-        'Snow',
-      ),
-      >= 80 && <= 82 => const _WeatherConditionMapping(
-        WeatherCondition.rainShowers,
-        'Rain showers',
-      ),
-      85 || 86 => const _WeatherConditionMapping(
-        WeatherCondition.snowShowers,
-        'Snow showers',
-      ),
-      >= 95 => const _WeatherConditionMapping(
-        WeatherCondition.thunderstorm,
-        'Thunderstorm',
-      ),
-      _ => const _WeatherConditionMapping(
-        WeatherCondition.unknown,
-        'Unknown conditions',
-      ),
+      0 => (condition: WeatherCondition.clear, description: 'Clear sky'),
+      1 || 2 => (condition: WeatherCondition.partlyCloudy, description: 'Partly cloudy'),
+      3 => (condition: WeatherCondition.overcast, description: 'Overcast'),
+      45 || 48 => (condition: WeatherCondition.fog, description: 'Foggy'),
+      >= 51 && <= 57 => (condition: WeatherCondition.drizzle, description: 'Drizzle'),
+      >= 61 && <= 67 => (condition: WeatherCondition.rain, description: 'Rain'),
+      >= 71 && <= 77 => (condition: WeatherCondition.snow, description: 'Snow'),
+      >= 80 && <= 82 => (condition: WeatherCondition.rainShowers, description: 'Rain showers'),
+      85 || 86 => (condition: WeatherCondition.snowShowers, description: 'Snow showers'),
+      >= 95 => (condition: WeatherCondition.thunderstorm, description: 'Thunderstorm'),
+      _ => (condition: WeatherCondition.unknown, description: 'Unknown conditions'),
     };
   }
 
@@ -189,11 +162,4 @@ class OpenMeteoWeatherRepository implements WeatherRepository {
   void close() {
     _client.close();
   }
-}
-
-class _WeatherConditionMapping {
-  const _WeatherConditionMapping(this.condition, this.description);
-
-  final WeatherCondition condition;
-  final String description;
 }
