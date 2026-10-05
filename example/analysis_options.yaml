@@ -2,13 +2,15 @@ include: package:flutter_lints/flutter.yaml
 
 linter:
   rules:
-    - public_member_api_docs
     - unawaited_futures
     - prefer_final_locals
-
-# Additional information about this file can be found at
-# https://dart.dev/guides/language/analysis-options
 
 formatter:
   page_width: 120
   trailing_commas: preserve
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**

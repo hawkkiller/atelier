@@ -1,5 +1,12 @@
 # atelier — Lifecycle-first MVVM Framework for Flutter
 
+> **Status.** Sections 1–8 describe the API implemented in `lib/`. Section 9
+> (Dependency Injection), Section 10 (Scopes), "Possible Package Split" and any
+> `@injectable`, `@singleton`, `vmFactory`, `appGraph` or scope APIs are **not
+> implemented**; they are design notes for later releases. The source of truth
+> for current behavior is the dartdoc in `lib/src/` and the contract tests in
+> `test/`.
+
 ## Summary
 
 `atelier` is a lifecycle-first MVVM framework for Flutter inspired by Android Architecture Components, Hilt, ViewModel, and structured task execution.
@@ -347,7 +354,9 @@ state. It publishes before returning and emits equal values. Reducers must be
 pure and non-reentrant: nested updates, starting or restarting a task on the
 owning ViewModel, or disposing it throw `StateError`; reducer errors propagate
 through the task `Future`. A stale context silently no-ops without evaluating
-its reducer. Zones are retained only for stale effect suppression.
+its reducer. Zones are retained only for effect suppression: emissions from a
+cancelled task, or from callbacks it registered, are dropped, while callbacks
+registered by a task that finished normally keep emitting until disposal.
 
 Usage:
 
@@ -411,8 +420,8 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginState extends State<LoginScreen>
     with AtelierVmMixin<LoginViewModel, LoginScreen> {
-  late final email = textController();
-  late final password = textController();
+  late final email = own(TextEditingController());
+  late final password = own(TextEditingController());
 
   @override
   LoginViewModel createViewModel(BuildContext context) {
@@ -452,13 +461,10 @@ Public API:
 mixin AtelierAutoDisposeMixin<W extends StatefulWidget> on State<W>
     implements AtelierStateBindings {
   T disposeWith<T>(T value, void Function(T value) dispose);
+}
 
-  TextEditingController textController({String? text});
-  FocusNode focusNode();
-  ScrollController scrollController({
-    double initialScrollOffset = 0,
-    bool keepScrollOffset = true,
-  });
+extension AtelierOwnExtension on AtelierStateBindings {
+  T own<T extends ChangeNotifier>(T notifier);
 }
 ```
 
@@ -478,9 +484,9 @@ void dispose() {
 Atelier should provide reusable lifecycle helpers:
 
 ```dart
-late final email = textController();
-late final focus = focusNode();
-late final scroll = scrollController();
+late final email = own(TextEditingController());
+late final focus = own(FocusNode());
+late final scroll = own(ScrollController());
 ```
 
 These should automatically dispose when the owning `State` is disposed.
@@ -497,8 +503,8 @@ class EmailFieldSection extends StatefulWidget {
 
 class _EmailFieldSectionState extends State<EmailFieldSection>
     with AtelierAutoDisposeMixin<EmailFieldSection> {
-  late final controller = textController();
-  late final focus = focusNode();
+  late final controller = own(TextEditingController());
+  late final focus = own(FocusNode());
 
   @override
   Widget build(BuildContext context) {
@@ -593,7 +599,7 @@ Optimization escape hatches should exist, but should not be the primary API.
 
 
 
-### 9. Dependency Injection
+### 9. Dependency Injection (not implemented)
 
 The framework can include a build-time checked generated dependency graph.
 
@@ -703,7 +709,7 @@ context.vmFactory.createLoginViewModel();
 
 
 
-### 10. Scopes
+### 10. Scopes (not implemented)
 
 Scopes should map to real Flutter lifetimes.
 
@@ -888,7 +894,7 @@ The unique value is the combination of:
 
 
 
-## Possible Package Split
+## Possible Package Split (not planned yet)
 
 ```text
 atelier_core
@@ -978,8 +984,8 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginState extends State<LoginScreen>
     with AtelierVmMixin<LoginViewModel, LoginScreen> {
-  late final email = textController();
-  late final password = textController();
+  late final email = own(TextEditingController());
+  late final password = own(TextEditingController());
 
   @override
   LoginViewModel createViewModel(BuildContext context) {

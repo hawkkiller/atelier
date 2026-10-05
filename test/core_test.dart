@@ -259,6 +259,14 @@ void main() {
       expect(effects, ['during']);
     });
 
+    test('disposeWith releases resources after onDispose in reverse order', () {
+      final viewModel = _ResourceViewModel();
+      viewModel.dispose();
+
+      expect(viewModel.events, ['onDispose', 'b', 'a']);
+      expect(() => viewModel.register('late'), throwsStateError);
+    });
+
     test('disposal is idempotent', () {
       final viewModel = _TestViewModel();
 
@@ -643,7 +651,7 @@ void main() {
       viewModel.dispose();
       expect(context.isCancelled, isTrue);
       var settled = false;
-      future.whenComplete(() => settled = true);
+      unawaited(future.whenComplete(() => settled = true));
       await context.cancelled;
       expect(settled, isFalse);
       gate.complete();
@@ -728,6 +736,108 @@ void main() {
       ];
       await Future.wait(futures);
       expect(ran, 0);
+    });
+
+    test('re-entrant droppable call before the first await shares the active future', () async {
+      final viewModel = _TestViewModel();
+      var runs = 0;
+      late Future<void> inner;
+      final outer = viewModel.execute.droppable(key: 'd', (task) async {
+        runs++;
+        inner = viewModel.execute.droppable(key: 'd', (task) async => runs++);
+        await Future<void>.delayed(Duration.zero);
+      });
+
+      expect(identical(inner, outer), isTrue);
+      await outer;
+      expect(runs, 1);
+    });
+
+    test('re-entrant sequential call before the first await queues behind the active block', () async {
+      final viewModel = _TestViewModel();
+      final log = <String>[];
+      late Future<void> inner;
+      final outer = viewModel.execute.sequential(key: 's', (task) async {
+        log.add('a:start');
+        inner = viewModel.execute.sequential(key: 's', (task) async => log.add('b'));
+        await Future<void>.delayed(Duration.zero);
+        log.add('a:end');
+      });
+
+      await outer;
+      await inner;
+      expect(log, ['a:start', 'a:end', 'b']);
+    });
+
+    test('re-entrant restartable call before the first await supersedes the active block', () async {
+      final viewModel = _TestViewModel();
+      final gate = Completer<void>();
+      late TaskContext outerContext;
+      late TaskContext innerContext;
+      late Future<void> inner;
+      final outer = viewModel.execute.restartable(key: 'r', (task) async {
+        outerContext = task;
+        inner = viewModel.execute.restartable(key: 'r', (task) async {
+          innerContext = task;
+          await gate.future;
+        });
+        await gate.future;
+      });
+
+      expect(outerContext.isCancelled, isTrue);
+      expect(innerContext.isCancelled, isFalse);
+
+      final third = viewModel.execute.restartable(key: 'r', (task) async {});
+      expect(innerContext.isCancelled, isTrue);
+
+      gate.complete();
+      await Future.wait([outer, inner, third]);
+    });
+
+    test('callbacks registered by a finished task keep emitting until disposal', () async {
+      final viewModel = _TestViewModel();
+      final source = StreamController<String>.broadcast(sync: true);
+      final effects = <String>[];
+      viewModel.effects.listen(effects.add);
+
+      await viewModel.execute((task) async {
+        source.stream.listen(viewModel.emit);
+      });
+      source.add('after-finish');
+      await Future<void>.delayed(Duration.zero);
+      expect(effects, ['after-finish']);
+
+      viewModel.dispose();
+      source.add('after-dispose');
+      await Future<void>.delayed(Duration.zero);
+      expect(effects, ['after-finish']);
+      await source.close();
+    });
+
+    test('onTaskError can record failures and settle the task normally', () async {
+      final viewModel = _RecoveringViewModel();
+
+      await viewModel.execute((task) async {
+        task.updateState((_) => 1);
+        throw StateError('boom');
+      });
+
+      expect(viewModel.state.value, -1);
+      expect(viewModel.errors.single, isStateError);
+    });
+
+    test('onTaskError is not called for cooperative cancellation', () async {
+      final viewModel = _RecoveringViewModel();
+      final gate = Completer<void>();
+      final first = viewModel.execute.restartable(key: 'r', (task) async {
+        await gate.future;
+        task.throwIfCancelled();
+      });
+      await viewModel.execute.restartable(key: 'r', (task) async {});
+      gate.complete();
+      await first;
+
+      expect(viewModel.errors, isEmpty);
     });
 
     test('lane ownership collisions cover all pairs and concurrent coexistence', () async {
@@ -898,4 +1008,30 @@ final class _ThrowingDisposeViewModel extends ViewModel<int> {
   void onDispose() {
     throw ArgumentError('dispose failed');
   }
+}
+
+final class _RecoveringViewModel extends ViewModel<int> {
+  _RecoveringViewModel() : super(0);
+
+  final List<Object> errors = [];
+
+  @override
+  void onTaskError(TaskContext<int> task, Object error, StackTrace stackTrace) {
+    errors.add(error);
+    task.updateState((_) => -1);
+  }
+}
+
+final class _ResourceViewModel extends ViewModel<int> {
+  _ResourceViewModel() : super(0) {
+    register('a');
+    register('b');
+  }
+
+  final List<String> events = [];
+
+  void register(String name) => disposeWith<String>(name, events.add);
+
+  @override
+  void onDispose() => events.add('onDispose');
 }

@@ -25,8 +25,9 @@ effects, and tasks—not a replacement for Flutter's widget model.
   settles normally when work returns cooperatively or throws the expected
   `TaskCancelledException`; unrelated errors still propagate, including errors
   thrown after cancellation.
-- [x] Stale task zones discard Atelier state and effect writes, while
-  `TaskContext.ensureActive()` protects non-Atelier side effects.
+- [x] Stale task contexts no-op their state writes, cancelled task zones drop
+  effect writes, and `TaskContext.ensureActive()` protects non-Atelier side
+  effects.
 - [x] Flutter bindings provide `watch`, `watchSelect`, `listen`, ViewModel
   ownership, and resource disposal; the weather example uses Open-Meteo.
 

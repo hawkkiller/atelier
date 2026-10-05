@@ -5,6 +5,33 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('listen from build fails with a guiding assertion', (tester) async {
+    await tester.pumpWidget(_MisuseHost(viewModel: _BindingViewModel(), listenInBuild: true));
+
+    final error = tester.takeException();
+    expect(error, isA<AssertionError>());
+    expect('$error', contains('initState'));
+  });
+
+  testWidgets('watch outside build fails with a guiding assertion', (tester) async {
+    await tester.pumpWidget(_MisuseHost(viewModel: _BindingViewModel(), listenInBuild: false));
+    final state = tester.state<_MisuseHostState>(find.byType(_MisuseHost));
+
+    expect(() => state.watch(state.widget.viewModel.state), throwsA(isA<AssertionError>()));
+  });
+
+  testWidgets('own disposes change notifiers with the State', (tester) async {
+    await tester.pumpWidget(_MisuseHost(viewModel: _BindingViewModel(), listenInBuild: false));
+    final notifier = tester.state<_MisuseHostState>(find.byType(_MisuseHost)).notifier;
+    var disposed = false;
+    notifier.addListener(() {});
+
+    await tester.pumpWidget(const SizedBox());
+
+    expect(() => notifier.addListener(() => disposed = true), throwsFlutterError);
+    expect(disposed, isFalse);
+  });
+
   testWidgets('creates ViewModel inside super.initState and disposes it', (
     tester,
   ) async {
@@ -535,9 +562,7 @@ final class _AutoDisposeHost extends StatefulWidget {
 }
 
 final class _AutoDisposeHostState extends State<_AutoDisposeHost> with AtelierAutoDisposeMixin<_AutoDisposeHost> {
-  late final TextEditingController controller = textController(
-    text: 'automatic',
-  );
+  late final TextEditingController controller = own(TextEditingController(text: 'automatic'));
 
   @override
   void initState() {
@@ -855,5 +880,28 @@ final class _ExternalHostState extends State<_ExternalHost> with AtelierAutoDisp
       textDirection: TextDirection.ltr,
       child: Text('${watch(widget.vm.state)}'),
     );
+  }
+}
+
+final class _MisuseHost extends StatefulWidget {
+  const _MisuseHost({required this.viewModel, required this.listenInBuild});
+
+  final _BindingViewModel viewModel;
+  final bool listenInBuild;
+
+  @override
+  State<_MisuseHost> createState() => _MisuseHostState();
+}
+
+final class _MisuseHostState extends State<_MisuseHost> with AtelierAutoDisposeMixin<_MisuseHost> {
+  late final notifier = own(ValueNotifier<int>(0));
+
+  @override
+  Widget build(BuildContext context) {
+    notifier.value;
+    if (widget.listenInBuild) {
+      listen(widget.viewModel.effects, (_) {});
+    }
+    return const SizedBox();
   }
 }
