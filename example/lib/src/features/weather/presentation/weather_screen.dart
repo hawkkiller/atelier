@@ -352,10 +352,8 @@ class _WeatherSearchScreenState extends State<WeatherSearchScreen>
 
   @override
   Widget build(BuildContext context) {
-    final search = watchSelect(
-      viewModel.state,
-      (state) => (suggestions: state.suggestions, status: state.searchStatus),
-    );
+    final search = watch(viewModel.state);
+    final searching = watch(viewModel.search.isRunning);
 
     return PopScope<String?>(
       canPop: false,
@@ -407,9 +405,9 @@ class _WeatherSearchScreenState extends State<WeatherSearchScreen>
                   header,
                   const SizedBox(height: 18),
                   if (constraints.maxHeight < 520)
-                    SizedBox(height: 240, child: _buildResults(search.suggestions, search.status))
+                    SizedBox(height: 240, child: _buildResults(search, searching))
                   else
-                    Expanded(child: _buildResults(search.suggestions, search.status)),
+                    Expanded(child: _buildResults(search, searching)),
                   const SizedBox(height: 12),
                   field,
                 ];
@@ -435,7 +433,8 @@ class _WeatherSearchScreenState extends State<WeatherSearchScreen>
     );
   }
 
-  Widget _buildResults(List<String> suggestions, WeatherSearchStatus status) {
+  Widget _buildResults(WeatherSearchState search, bool searching) {
+    final suggestions = search.suggestions;
     if (_query.trim().isEmpty) {
       return const _SearchMessage(
         key: Key('weather-search-prompt'),
@@ -444,13 +443,13 @@ class _WeatherSearchScreenState extends State<WeatherSearchScreen>
         message: 'Enter a place name to check its current weather.',
       );
     }
-    if (status == WeatherSearchStatus.loading) {
+    if (searching) {
       return const Center(
         key: Key('weather-search-loading'),
         child: CircularProgressIndicator(color: Colors.black),
       );
     }
-    if (status == WeatherSearchStatus.failed) {
+    if (search.failed) {
       return _SearchMessage(
         key: const Key('weather-search-error'),
         icon: PhosphorIconsLight.cloudWarning,

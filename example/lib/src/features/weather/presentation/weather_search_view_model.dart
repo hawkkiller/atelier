@@ -10,29 +10,21 @@ class WeatherSearchViewModel extends ViewModel<WeatherSearchState> {
 
   final WeatherRepository _repository;
 
-  Future<void> search(String query) => execute.restartable(key: #searchWeather, (task) async {
-    final normalizedQuery = query.trim();
-    if (normalizedQuery.isEmpty) {
-      task.updateState(
-        (state) => state.copyWith(suggestions: const [], searchStatus: WeatherSearchStatus.idle),
-      );
+  /// Loading is `search.isRunning`; state only holds results and failure.
+  late final search = restartable((String query, task) async {
+    final q = query.trim();
+    if (q.isEmpty) {
+      task.state = const WeatherSearchState();
       return;
     }
 
-    task.updateState((state) => state.copyWith(searchStatus: WeatherSearchStatus.loading));
     try {
-      final suggestions = await _repository.search(normalizedQuery, cancellationToken: task);
-      task.updateState(
-        (state) => state.copyWith(suggestions: suggestions, searchStatus: WeatherSearchStatus.idle),
-      );
+      final suggestions = await _repository.search(q, cancellationToken: task);
+      task.state = WeatherSearchState(suggestions: suggestions);
     } on WeatherNotFoundException {
-      task.updateState(
-        (state) => state.copyWith(suggestions: const [], searchStatus: WeatherSearchStatus.idle),
-      );
+      task.state = const WeatherSearchState();
     } on WeatherServiceException {
-      task.updateState(
-        (state) => state.copyWith(suggestions: const [], searchStatus: WeatherSearchStatus.failed),
-      );
+      task.state = const WeatherSearchState(failed: true);
     }
   });
 }
@@ -41,8 +33,6 @@ class WeatherSearchViewModel extends ViewModel<WeatherSearchState> {
 abstract class WeatherSearchState with _$WeatherSearchState {
   const factory WeatherSearchState({
     @Default([]) List<String> suggestions,
-    @Default(WeatherSearchStatus.idle) WeatherSearchStatus searchStatus,
+    @Default(false) bool failed,
   }) = _WeatherSearchState;
 }
-
-enum WeatherSearchStatus { idle, loading, failed }
