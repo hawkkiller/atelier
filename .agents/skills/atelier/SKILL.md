@@ -95,7 +95,7 @@ class _SearchScreenState extends State<SearchScreen>
   @override
   Widget build(BuildContext context) {
     final loading = watch(viewModel.search.isRunning);
-    return SearchView(loading: loading, onChanged: viewModel.search);
+    return SearchView(loading: loading, onChanged: viewModel.search.call);
   }
 }
 ```
