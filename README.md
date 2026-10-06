@@ -40,7 +40,13 @@ Canonical mutations happen only inside an `execute` task through
 and emit equal values. Stale contexts silently no-op without evaluating their
 reducers. Reducers are pure and non-reentrant; nested updates, starting a task
 on the owning ViewModel, or disposing it from a reducer throws `StateError`.
-Zones remain only for stale effect suppression.
+Zones remain only for effect suppression: effects emitted by a cancelled task,
+including callbacks it registered, are dropped. Callbacks registered by a task
+that finished normally (stream listeners, timers) keep emitting until the
+ViewModel is disposed.
+
+Keyed calls are re-entrant: a task may start another task with its own key,
+even before its first `await`, and the lane policy still applies.
 
 Dependency injection is not part of the current implementation.
 
@@ -79,7 +85,7 @@ Own the ViewModel from a regular `StatefulWidget`:
 ```dart
 class _SearchScreenState extends State<SearchScreen>
     with AtelierVmMixin<SearchViewModel, SearchScreen> {
-  late final query = textController();
+  late final query = own(TextEditingController());
 
   @override
   SearchViewModel createViewModel(BuildContext context) {
@@ -113,6 +119,33 @@ SearchViewModel createViewModel(BuildContext context) {
 
 Do not call `dependOnInheritedWidgetOfExactType` (or another listening lookup)
 from `createViewModel()`.
+
+### Errors
+
+Errors other than a task's own cancellation propagate through the command's
+`Future`. UI code usually does not await commands, so override `onTaskError` to
+turn unexpected failures into state or effects instead of uncaught errors:
+
+```dart
+@override
+void onTaskError(TaskContext<SearchState> task, Object error, StackTrace stackTrace) {
+  task.updateState((state) => state.copyWith(loading: false, failed: true));
+  _effects.emit(SearchEffect.failed);
+}
+```
+
+When `onTaskError` returns normally, the task's `Future` completes normally.
+The default implementation rethrows.
+
+### Resources
+
+`own(notifier)` disposes any `ChangeNotifier` (text, scroll, page and tab
+controllers, focus nodes, `ValueNotifier`s) with the owning `State`;
+`disposeWith(value, dispose)` handles everything else. ViewModels have their
+own `disposeWith` for subscriptions and timers, released after `onDispose()`.
+
+Call `watch`/`watchSelect` only while building and `listen` only outside
+`build` (usually `initState`); debug builds assert both.
 
 `watch` subscriptions are identified by their build call position and source;
 repeating a `listen` call with the same effects and listener identities

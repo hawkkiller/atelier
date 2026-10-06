@@ -57,10 +57,17 @@ void main() {
     );
   });
 
-  test('unexpected repository errors propagate', () async {
+  test('unexpected repository errors become state and an effect', () async {
     final repository = _ControlledRepository()..loadError = StateError('bug');
     final viewModel = WeatherViewModel(repository);
-    await expectLater(viewModel.load('Warsaw'), throwsStateError);
+    final effects = <WeatherEffect>[];
+    viewModel.effects.listen(effects.add);
+
+    await viewModel.load('Warsaw');
+    await Future<void>.delayed(Duration.zero);
+
+    expect(viewModel.state.value.loadStatus, WeatherLoadStatus.serviceUnavailable);
+    expect(effects, [WeatherEffect.unexpectedFailure]);
   });
 }
 

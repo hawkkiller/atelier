@@ -31,6 +31,27 @@ abstract interface class AtelierStateBindings {
   ///
   /// The subscription is cancelled automatically during [State.dispose].
   void listen<E>(Effects<E> effects, void Function(E effect) listener);
+
+  /// Registers [value] to be released with [dispose] when the [State] is
+  /// disposed, and returns [value].
+  ///
+  /// Resources are released in reverse registration order. For
+  /// [ChangeNotifier]s such as controllers and focus nodes, prefer [own].
+  T disposeWith<T>(T value, void Function(T value) dispose);
+}
+
+/// Disposal helpers built on [AtelierStateBindings.disposeWith].
+extension AtelierOwnExtension on AtelierStateBindings {
+  /// Disposes [notifier] with the owning [State] and returns it.
+  ///
+  /// Works for every [ChangeNotifier]-based Flutter object:
+  ///
+  /// ```dart
+  /// late final query = own(TextEditingController());
+  /// late final focus = own(FocusNode(debugLabel: 'query'));
+  /// late final scroll = own(ScrollController());
+  /// ```
+  T own<T extends ChangeNotifier>(T notifier) => disposeWith(notifier, (notifier) => notifier.dispose());
 }
 
 /// Adds state/effect bindings and automatic resource disposal to a [State].
@@ -38,6 +59,7 @@ mixin AtelierAutoDisposeMixin<W extends StatefulWidget> on State<W> implements A
   late final _AtelierStateLifecycle _atelierLifecycle = _AtelierStateLifecycle(
     isMounted: () => mounted,
     rebuild: () => setState(() {}),
+    debugDoingBuild: () => context.debugDoingBuild,
   );
 
   @override
@@ -57,32 +79,9 @@ mixin AtelierAutoDisposeMixin<W extends StatefulWidget> on State<W> implements A
     _atelierLifecycle.listen(effects, listener);
   }
 
+  @override
   T disposeWith<T>(T value, void Function(T value) dispose) {
     return _atelierLifecycle.disposeWith(value, dispose);
-  }
-
-  TextEditingController textController({String? text}) {
-    return disposeWith(
-      TextEditingController(text: text),
-      (controller) => controller.dispose(),
-    );
-  }
-
-  FocusNode focusNode() {
-    return disposeWith(FocusNode(), (node) => node.dispose());
-  }
-
-  ScrollController scrollController({
-    double initialScrollOffset = 0,
-    bool keepScrollOffset = true,
-  }) {
-    return disposeWith(
-      ScrollController(
-        initialScrollOffset: initialScrollOffset,
-        keepScrollOffset: keepScrollOffset,
-      ),
-      (controller) => controller.dispose(),
-    );
   }
 
   @override
@@ -143,12 +142,18 @@ mixin AtelierVmMixin<VM extends ViewModel<Object>, W extends StatefulWidget> on 
   late final _atelierLifecycle = _AtelierStateLifecycle(
     isMounted: () => mounted,
     rebuild: () => setState(() {}),
+    debugDoingBuild: () => context.debugDoingBuild,
   );
   late final VM _atelierViewModel;
   bool _atelierViewModelCreated = false;
 
+  /// Creates the owned ViewModel. Called once, during `super.initState()`.
+  ///
+  /// Use non-listening lookups only, such as
+  /// [BuildContext.getInheritedWidgetOfExactType].
   VM createViewModel(BuildContext context);
 
+  /// The ViewModel created by [createViewModel], disposed with this [State].
   VM get viewModel {
     if (!_atelierViewModelCreated) {
       throw StateError(
@@ -183,32 +188,9 @@ mixin AtelierVmMixin<VM extends ViewModel<Object>, W extends StatefulWidget> on 
     _atelierLifecycle.listen(effects, listener);
   }
 
+  @override
   T disposeWith<T>(T value, void Function(T value) dispose) {
     return _atelierLifecycle.disposeWith(value, dispose);
-  }
-
-  TextEditingController textController({String? text}) {
-    return disposeWith(
-      TextEditingController(text: text),
-      (controller) => controller.dispose(),
-    );
-  }
-
-  FocusNode focusNode() {
-    return disposeWith(FocusNode(), (node) => node.dispose());
-  }
-
-  ScrollController scrollController({
-    double initialScrollOffset = 0,
-    bool keepScrollOffset = true,
-  }) {
-    return disposeWith(
-      ScrollController(
-        initialScrollOffset: initialScrollOffset,
-        keepScrollOffset: keepScrollOffset,
-      ),
-      (controller) => controller.dispose(),
-    );
   }
 
   @override
@@ -278,11 +260,14 @@ final class _AtelierStateLifecycle {
   _AtelierStateLifecycle({
     required bool Function() isMounted,
     required void Function() rebuild,
+    required bool Function() debugDoingBuild,
   }) : _isMounted = isMounted,
-       _rebuild = rebuild;
+       _rebuild = rebuild,
+       _debugDoingBuild = debugDoingBuild;
 
   final bool Function() _isMounted;
   final void Function() _rebuild;
+  final bool Function() _debugDoingBuild;
   final List<_WatchSlot> _watchSlots = [];
   final List<_EffectSubscription> _effectSubscriptions = [];
   final List<void Function()> _resourceDisposers = [];
@@ -318,6 +303,11 @@ final class _AtelierStateLifecycle {
     bool Function(R previous, R next) equals,
   ) {
     _ensureBindingsActive();
+    assert(
+      WidgetsBinding.instance.buildOwner?.debugBuilding ?? true,
+      'watch() and watchSelect() must be called while building, typically from State.build(). '
+      'Read `viewModel.state.value` in callbacks and lifecycle methods instead.',
+    );
     beginWatchCycle();
 
     final index = _watchCursor++;
@@ -387,12 +377,16 @@ final class _AtelierStateLifecycle {
   void _requestRebuild() {
     if (!_bindingsDisposed && _isMounted()) {
       _rebuild();
-      beginWatchCycle(afterBuild: true);
     }
   }
 
   void listen<E>(Effects<E> effects, void Function(E effect) listener) {
     _ensureBindingsActive();
+    assert(
+      !_debugDoingBuild(),
+      'listen() must not be called from build(): every build would add a subscription. '
+      'Call it from initState() instead.',
+    );
     for (final entry in _effectSubscriptions) {
       if (identical(entry.effects, effects) && identical(entry.listener, listener)) {
         return;

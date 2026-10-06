@@ -10,6 +10,10 @@ class WeatherViewModel extends ViewModel<WeatherState> {
   WeatherViewModel(this._repository) : super(const WeatherState());
 
   final WeatherRepository _repository;
+  late final MutableEffects<WeatherEffect> _effects = effectsOf();
+
+  /// One-shot outcomes the screen presents, such as a snackbar.
+  Effects<WeatherEffect> get effects => _effects;
 
   Future<void> load(String city) => execute.restartable(key: #loadWeather, (task) async {
     final normalizedCity = city.trim();
@@ -29,7 +33,17 @@ class WeatherViewModel extends ViewModel<WeatherState> {
       task.updateState((state) => state.copyWith(loadStatus: .serviceUnavailable));
     }
   });
+
+  /// Unexpected failures (bugs, malformed responses) end up here instead of
+  /// escaping as uncaught errors from fire-and-forget UI calls.
+  @override
+  void onTaskError(TaskContext<WeatherState> task, Object error, StackTrace stackTrace) {
+    task.updateState((state) => state.copyWith(loadStatus: .serviceUnavailable));
+    _effects.emit(.unexpectedFailure);
+  }
 }
+
+enum WeatherEffect { unexpectedFailure }
 
 @freezed
 abstract class WeatherState with _$WeatherState {

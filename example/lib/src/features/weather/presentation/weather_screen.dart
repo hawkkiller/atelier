@@ -31,7 +31,15 @@ class _WeatherScreenState extends State<WeatherScreen> with AtelierVmMixin<Weath
   @override
   void initState() {
     super.initState();
+    listen(viewModel.effects, _onEffect);
     viewModel.load('Kraków');
+  }
+
+  void _onEffect(WeatherEffect effect) {
+    final message = switch (effect) {
+      WeatherEffect.unexpectedFailure => 'Something went wrong. Please try again.',
+    };
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -72,7 +80,7 @@ class _WeatherScreenState extends State<WeatherScreen> with AtelierVmMixin<Weath
       ),
     );
 
-    if (city != null && mounted) viewModel.load(city);
+    if (city != null && mounted) unawaited(viewModel.load(city));
   }
 }
 
@@ -315,8 +323,8 @@ class WeatherSearchScreen extends StatefulWidget {
 
 class _WeatherSearchScreenState extends State<WeatherSearchScreen>
     with AtelierVmMixin<WeatherSearchViewModel, WeatherSearchScreen> {
-  late final _controller = textController();
-  late final _focusNode = focusNode();
+  late final _controller = own(TextEditingController());
+  late final _focusNode = own(FocusNode());
   String _query = '';
   bool _isClosing = false;
 
