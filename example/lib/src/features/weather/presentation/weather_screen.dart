@@ -93,7 +93,6 @@ class _CitySearchState extends State<CitySearch> with AtelierVmMixin<WeatherSear
   @override
   Widget build(BuildContext context) {
     final state = watch(viewModel.state);
-    final searching = watch(viewModel.search.isRunning);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -103,7 +102,7 @@ class _CitySearchState extends State<CitySearch> with AtelierVmMixin<WeatherSear
           decoration: const InputDecoration(hintText: 'Search for a city'),
           onChanged: viewModel.search.call,
         ),
-        if (searching) const LinearProgressIndicator(),
+        if (state.loading) const LinearProgressIndicator(),
         if (state.failed)
           ListTile(
             title: const Text('Search is unavailable'),

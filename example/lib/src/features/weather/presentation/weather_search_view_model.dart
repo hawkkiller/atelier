@@ -10,7 +10,6 @@ class WeatherSearchViewModel extends ViewModel<WeatherSearchState> {
 
   final WeatherRepository _repository;
 
-  /// Loading is `search.isRunning`; state only holds results and failure.
   late final search = restartable((String query, task) async {
     final q = query.trim();
     if (q.isEmpty) {
@@ -18,6 +17,7 @@ class WeatherSearchViewModel extends ViewModel<WeatherSearchState> {
       return;
     }
 
+    task.state = task.state.copyWith(loading: true, failed: false);
     try {
       final suggestions = await _repository.search(q, cancellationToken: task);
       task.state = WeatherSearchState(suggestions: suggestions);
@@ -27,12 +27,20 @@ class WeatherSearchViewModel extends ViewModel<WeatherSearchState> {
       task.state = const WeatherSearchState(failed: true);
     }
   });
+
+  /// Clears the spinner when a search fails unexpectedly, then rethrows.
+  @override
+  void onTaskError(TaskContext<WeatherSearchState> task, Object error, StackTrace stackTrace) {
+    task.state = task.state.copyWith(loading: false);
+    super.onTaskError(task, error, stackTrace);
+  }
 }
 
 @freezed
 abstract class WeatherSearchState with _$WeatherSearchState {
   const factory WeatherSearchState({
     @Default([]) List<String> suggestions,
+    @Default(false) bool loading,
     @Default(false) bool failed,
   }) = _WeatherSearchState;
 }

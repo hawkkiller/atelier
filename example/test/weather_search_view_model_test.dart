@@ -13,10 +13,10 @@ void main() {
     final repository = _ControlledRepository(searchResult: () => completer.future);
     final viewModel = WeatherSearchViewModel(repository);
     final future = viewModel.search(' War ');
-    expect(viewModel.search.isRunning.value, isTrue);
+    expect(viewModel.state.value.loading, isTrue);
     completer.complete(['Warsaw']);
     await future;
-    expect(viewModel.search.isRunning.value, isFalse);
+    expect(viewModel.state.value.loading, isFalse);
     expect(viewModel.state.value.suggestions, ['Warsaw']);
     await viewModel.search(' ');
     expect(viewModel.state.value, const WeatherSearchState());
@@ -46,6 +46,7 @@ void main() {
     final repository = _ControlledRepository()..searchError = StateError('bug');
     final viewModel = WeatherSearchViewModel(repository);
     await expectLater(viewModel.search('War'), throwsStateError);
+    expect(viewModel.state.value.loading, isFalse);
   });
 }
 
