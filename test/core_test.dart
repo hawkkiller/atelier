@@ -929,6 +929,97 @@ void main() {
       expect(callbackCount, 0);
     });
   });
+  group('Command', () {
+    test('task.state reads the latest state and assignment writes it', () async {
+      final viewModel = _CommandViewModel();
+      await viewModel.add(2);
+      await viewModel.add(3);
+      expect(viewModel.state.value, 5);
+    });
+
+    test('stale task.state assignments are no-ops', () async {
+      final viewModel = _CommandViewModel();
+      final gate = Completer<void>();
+      final first = viewModel.load((gate: gate, value: 1));
+      await viewModel.load((gate: null, value: 2));
+      gate.complete();
+      await first;
+      expect(viewModel.state.value, 2);
+    });
+
+    test('isRunning tracks pending invocations synchronously', () async {
+      final viewModel = _CommandViewModel();
+      final events = <bool>[];
+      viewModel.load.isRunning.listen(events.add);
+      final gate = Completer<void>();
+
+      final first = viewModel.load((gate: gate, value: 1));
+      expect(viewModel.load.isRunning.value, isTrue);
+      final second = viewModel.load((gate: null, value: 2));
+      await second;
+      expect(viewModel.load.isRunning.value, isTrue, reason: 'the superseded block is still settling');
+      gate.complete();
+      await first;
+      expect(viewModel.load.isRunning.value, isFalse);
+      await Future<void>.delayed(Duration.zero);
+      expect(events, [false, true, false]);
+    });
+
+    test('each command is its own key and policies apply per command', () async {
+      final viewModel = _CommandViewModel();
+      final gate = Completer<void>();
+      var runs = 0;
+      viewModel.onSubmit = () async {
+        runs++;
+        await gate.future;
+      };
+
+      final a = viewModel.submit();
+      final b = viewModel.submit();
+      expect(identical(a, b), isTrue);
+      await viewModel.add(1);
+      gate.complete();
+      await a;
+      expect(runs, 1);
+      expect(viewModel.state.value, 1);
+    });
+
+    test('sequential commands queue in call order', () async {
+      final viewModel = _CommandViewModel();
+      await Future.wait([viewModel.append(1), viewModel.append(2), viewModel.append(3)]);
+      expect(viewModel.appended, [1, 2, 3]);
+    });
+
+    test('cancel cancels the running invocation and skips queued ones', () async {
+      final viewModel = _CommandViewModel();
+      final gate = Completer<void>();
+      viewModel.blockAppend = gate;
+      final first = viewModel.append(1);
+      final second = viewModel.append(2);
+
+      viewModel.append.cancel();
+      gate.complete();
+      await Future.wait([first, second]);
+
+      expect(viewModel.appended, isEmpty);
+      expect(viewModel.append.isRunning.value, isFalse);
+    });
+
+    test('commands are no-ops after disposal, even when first used then', () async {
+      final viewModel = _CommandViewModel()..dispose();
+      await viewModel.add(1);
+      expect(viewModel.state.value, 0);
+      expect(viewModel.add.isRunning.value, isFalse);
+    });
+
+    test('disposal closes isRunning', () async {
+      final viewModel = _CommandViewModel();
+      final done = Completer<void>();
+      viewModel.add.isRunning.listen((_) {}, onDone: done.complete);
+      viewModel.dispose();
+      await done.future;
+    });
+  });
 }
 
 Future<void> _startPolicy(
@@ -1034,4 +1125,29 @@ final class _ResourceViewModel extends ViewModel<int> {
 
   @override
   void onDispose() => events.add('onDispose');
+}
+
+final class _CommandViewModel extends ViewModel<int> {
+  _CommandViewModel() : super(0);
+
+  final List<int> appended = [];
+  Completer<void>? blockAppend;
+  Future<void> Function() onSubmit = () async {};
+
+  late final add = concurrent((int amount, task) async {
+    task.state = task.state + amount;
+  });
+
+  late final load = restartable((({Completer<void>? gate, int value}) request, task) async {
+    await request.gate?.future;
+    task.state = request.value;
+  });
+
+  late final submit = droppable.noArgs((task) => onSubmit());
+
+  late final append = sequential((int value, task) async {
+    await blockAppend?.future;
+    task.ensureActive();
+    appended.add(value);
+  });
 }

@@ -49,6 +49,16 @@ abstract interface class TaskContext<S extends Object> implements CancellationTo
   /// navigation, platform calls) that must not run for a stale task.
   void ensureActive();
 
+  /// The latest committed state of the owning ViewModel.
+  S get state;
+
+  /// Replaces the state; shorthand for `updateState((_) => value)`.
+  ///
+  /// `task.state = task.state.copyWith(...)` reads and writes in one
+  /// synchronous expression, so it always builds on the latest state. Like
+  /// [updateState], assignments from a stale context are silent no-ops.
+  set state(S value);
+
   /// Applies a synchronous reducer to the latest committed state.
   ///
   /// The new state is published before this method returns, and equal values
@@ -126,12 +136,15 @@ final class AtelierTaskExecutor<S extends Object> implements TaskExecutor<S> {
   /// Creates an executor wired to its ViewModel's state and error hooks.
   AtelierTaskExecutor({
     required void Function(TaskContext<S>, S Function(S)) updateState,
+    required S Function() readState,
     required void Function() checkAllowed,
     required void Function(TaskContext<S> task, Object error, StackTrace stackTrace) onError,
   }) : _updateState = updateState,
+       _readState = readState,
        _checkAllowed = checkAllowed,
        _onError = onError;
   final void Function(TaskContext<S>, S Function(S)) _updateState;
+  final S Function() _readState;
   final void Function() _checkAllowed;
   final void Function(TaskContext<S> task, Object error, StackTrace stackTrace) _onError;
   bool _isDisposed = false;
@@ -254,7 +267,13 @@ final class AtelierTaskExecutor<S extends Object> implements TaskExecutor<S> {
   }
 
   _TaskContext<S> _newContext(Object? key, TaskPolicy policy) {
-    return _TaskContext<S>(key: key, policy: policy, update: _updateState, isOwnerDisposed: () => _isDisposed);
+    return _TaskContext<S>(
+      key: key,
+      policy: policy,
+      update: _updateState,
+      read: _readState,
+      isOwnerDisposed: () => _isDisposed,
+    );
   }
 
   /// Publishes [context] as the lane's active invocation before [block] runs,
@@ -340,6 +359,23 @@ final class AtelierTaskExecutor<S extends Object> implements TaskExecutor<S> {
 
   Future<void> _disposedFuture() async {}
 
+  /// Cancels every active invocation started with [key] and skips its queued
+  /// sequential invocations. Other keys are unaffected.
+  void cancelKey(Object key) {
+    _checkAllowed();
+    const cancellation = TaskCancelledException('The task was cancelled.');
+    final lane = _lanes[key];
+    if (lane != null) {
+      for (final invocation in lane.queue) {
+        invocation.cancel();
+      }
+      lane.queue.clear();
+    }
+    for (final context in List<_TaskContext<S>>.of(_activeContexts)) {
+      if (identical(context.key, key)) context.cancel(cancellation);
+    }
+  }
+
   /// Cancels active tasks, skips queued ones and rejects later calls.
   void dispose() {
     if (_isDisposed) {
@@ -364,8 +400,15 @@ final class AtelierTaskExecutor<S extends Object> implements TaskExecutor<S> {
 }
 
 final class _TaskContext<S extends Object> implements TaskContext<S>, AtelierTaskZoneContext {
-  _TaskContext({required this.key, required this.policy, required this.update, required this.isOwnerDisposed});
+  _TaskContext({
+    required this.key,
+    required this.policy,
+    required this.update,
+    required this.read,
+    required this.isOwnerDisposed,
+  });
   final void Function(TaskContext<S>, S Function(S)) update;
+  final S Function() read;
   final bool Function() isOwnerDisposed;
 
   @override
@@ -408,6 +451,12 @@ final class _TaskContext<S extends Object> implements TaskContext<S>, AtelierTas
       throw StateError('The task is no longer active.');
     }
   }
+
+  @override
+  S get state => read();
+
+  @override
+  set state(S value) => updateState((_) => value);
 
   @override
   void updateState(S Function(S current) reducer) {

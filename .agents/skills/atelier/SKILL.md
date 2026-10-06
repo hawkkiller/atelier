@@ -1,6 +1,6 @@
 ---
 name: atelier
-description: Use when writing or changing code that uses the atelier Flutter package (ViewModel, execute.*, task.updateState, effects, AtelierVmMixin, watch/listen, own). Recipes and invariants.
+description: Use when writing or changing code that uses the atelier Flutter package (ViewModel, commands like restartable/droppable, task.state, execute.*, effects, AtelierVmMixin, watch/listen, own). Recipes and invariants.
 ---
 
 # Using Atelier
@@ -16,7 +16,11 @@ dependency injection and scopes are **not implemented**; do not generate
 ## Invariants
 
 - One immutable state per ViewModel, passed to `super(initialState)`.
-- State changes only inside a task: `task.updateState((s) => s.copyWith(...))`.
+- Public operations are commands declared as fields:
+  `late final search = restartable((String query, task) async {...})`.
+  Prefer them over `execute.*`, which is for ad-hoc work.
+- State changes only inside a command or task: `task.state = task.state.copyWith(...)`
+  or `task.updateState((s) => ...)`. Use `command.isRunning` instead of loading flags.
   Reducers are synchronous and pure; never start tasks, update state, or
   dispose from a reducer.
 - After every `await`, a task may be stale. `updateState` and `emit` from a
@@ -37,10 +41,12 @@ dependency injection and scopes are **not implemented**; do not generate
 
 | Need | Call |
 |---|---|
-| Independent work, no coordination | `execute((task) async {...})` |
-| Latest call wins (search, reload) | `execute.restartable(key: #search, ...)` |
-| Ignore repeats while running (submit button) | `execute.droppable(key: #submit, ...)` |
-| Run in order (queued writes) | `execute.sequential(key: #save, ...)` |
+| Independent work, no coordination | `late final log = concurrent((String e, task) async {...})` |
+| Latest call wins (search, reload) | `late final search = restartable((String q, task) async {...})` |
+| Ignore repeats while running (submit button) | `late final submit = droppable.noArgs((task) async {...})` |
+| Run in order (queued writes) | `late final save = sequential((Item item, task) async {...})` |
+
+Each command is its own key. Several arguments go in a record.
 
 ## Recipes
 
@@ -54,15 +60,13 @@ class SearchViewModel extends ViewModel<SearchState> {
   late final MutableEffects<SearchEffect> _effects = effectsOf();
   Effects<SearchEffect> get effects => _effects;
 
-  Future<void> search(String query) => execute.restartable(key: #search, (task) async {
-    task.updateState((s) => s.copyWith(loading: true));
+  late final search = restartable((String query, task) async {
     final results = await _repository.search(query, cancellationToken: task);
-    task.updateState((s) => s.copyWith(loading: false, results: results));
+    task.state = SearchState(results: results);
   });
 
   @override
   void onTaskError(TaskContext<SearchState> task, Object error, StackTrace stackTrace) {
-    task.updateState((s) => s.copyWith(loading: false));
     _effects.emit(SearchEffect.failed);
   }
 }
@@ -90,8 +94,8 @@ class _SearchScreenState extends State<SearchScreen>
 
   @override
   Widget build(BuildContext context) {
-    final loading = watchSelect(viewModel.state, (s) => s.loading);
-    return SearchView(loading: loading, onChanged: viewModel.search);
+    final loading = watch(viewModel.search.isRunning);
+    return SearchView(loading: loading, onChanged: viewModel.search.call);
   }
 }
 ```

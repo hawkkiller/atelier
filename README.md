@@ -3,7 +3,7 @@
 Atelier is a lifecycle-first MVVM framework for Flutter. It provides:
 
 - ViewModel-owned state and effects;
-- concurrent, sequential, droppable, and restartable tasks;
+- commands with concurrent, sequential, droppable, and restartable policies;
 - cooperative task cancellation;
 - Flutter lifecycle bindings with `watch`, `watchSelect`, and `listen`;
 - automatic disposal for controllers and arbitrary resources.
@@ -35,9 +35,9 @@ call `task.ensureActive()` immediately before the side effect.
 
 Each `ViewModel<S extends Object>` requires one initial aggregate state via
 `super(initialState)`. Its built-in `state` is a read-only `StateValue<S>`.
-Canonical mutations happen only inside an `execute` task through
-`task.updateState`: reducers are synchronous, use the latest committed state,
-and emit equal values. Stale contexts silently no-op without evaluating their
+Canonical mutations happen only inside a command or `execute` task, through
+`task.state = ...` or `task.updateState`: writes are synchronous, use the
+latest committed state, and emit equal values. Stale contexts silently no-op without evaluating their
 reducers. Reducers are pure and non-reentrant; nested updates, starting a task
 on the owning ViewModel, or disposing it from a reducer throws `StateError`.
 Zones remain only for effect suppression: effects emitted by a cancelled task,
@@ -61,23 +61,34 @@ class SearchViewModel extends ViewModel<SearchState> {
 
   Effects<SearchEffect> get effects => _effects;
 
-  Future<void> search(String query) => execute.restartable(
-        key: 'search',
-        (task) async {
-          task.updateState((state) => state.copyWith(loading: true));
-
-          final results = await repository.search(
-            query,
-            cancellationToken: task,
-          );
-          task.ensureActive();
-
-          task.updateState(
-            (state) => state.copyWith(loading: false, results: results),
-          );
-        },
-      );
+  late final search = restartable((String query, task) async {
+    final results = await repository.search(query, cancellationToken: task);
+    task.state = task.state.copyWith(results: results);
+  });
 }
+```
+
+### Commands
+
+`restartable`, `droppable`, `sequential` and `concurrent` declare a command as
+a field. The command is called like a method (`viewModel.search('Kra')`),
+returns `Future<void>`, and is its own lane key, so no key symbols are needed.
+Use a record for several arguments and `.noArgs` for none:
+
+```dart
+late final refresh = droppable.noArgs((task) async { ... });
+late final save = sequential(((String id, String name) args, task) async { ... });
+```
+
+Every command exposes `isRunning`, a `StateValue<bool>` that is true while an
+invocation is running or queued, so loading flags don't need to live in state:
+
+```dart
+final searching = watch(viewModel.search.isRunning);
+```
+
+`command.cancel()` cancels its running invocation and skips queued ones.
+`execute.*` remains available for ad-hoc tasks.
 ```
 
 Own the ViewModel from a regular `StatefulWidget`:

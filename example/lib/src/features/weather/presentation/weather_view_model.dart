@@ -15,22 +15,21 @@ class WeatherViewModel extends ViewModel<WeatherState> {
   /// One-shot outcomes the screen presents, such as a snackbar.
   Effects<WeatherEffect> get effects => _effects;
 
-  Future<void> load(String city) => execute.restartable(key: #loadWeather, (task) async {
-    final normalizedCity = city.trim();
-    if (normalizedCity.isEmpty) {
-      task.updateState((state) => state.copyWith(requestedCity: '', loadStatus: .emptyInput));
+  late final load = restartable((String city, task) async {
+    final q = city.trim();
+    if (q.isEmpty) {
+      task.state = task.state.copyWith(requestedCity: '', loadStatus: .emptyInput);
       return;
     }
 
-    task.updateState((state) => state.copyWith(requestedCity: normalizedCity, loadStatus: .loading));
-
+    task.state = task.state.copyWith(requestedCity: q, loadStatus: .loading);
     try {
-      final weather = await _repository.load(normalizedCity, cancellationToken: task);
-      task.updateState((state) => state.copyWith(weather: weather, loadStatus: .success));
+      final weather = await _repository.load(q, cancellationToken: task);
+      task.state = task.state.copyWith(weather: weather, loadStatus: .success);
     } on WeatherNotFoundException {
-      task.updateState((state) => state.copyWith(loadStatus: .notFound));
+      task.state = task.state.copyWith(loadStatus: .notFound);
     } on WeatherServiceException {
-      task.updateState((state) => state.copyWith(loadStatus: .serviceUnavailable));
+      task.state = task.state.copyWith(loadStatus: .serviceUnavailable);
     }
   });
 
@@ -38,7 +37,7 @@ class WeatherViewModel extends ViewModel<WeatherState> {
   /// escaping as uncaught errors from fire-and-forget UI calls.
   @override
   void onTaskError(TaskContext<WeatherState> task, Object error, StackTrace stackTrace) {
-    task.updateState((state) => state.copyWith(loadStatus: .serviceUnavailable));
+    task.state = task.state.copyWith(loadStatus: .serviceUnavailable);
     _effects.emit(.unexpectedFailure);
   }
 }
