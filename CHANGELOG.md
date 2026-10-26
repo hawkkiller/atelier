@@ -1,4 +1,4 @@
-## Unreleased
+## 0.1.0
 
 - **Breaking:** replace `textController()`, `focusNode()` and `scrollController()` with
   `own(notifier)`, which disposes any `ChangeNotifier`; `disposeWith` is now part of
