@@ -1,6 +1,7 @@
 name: atelier_weather_example
 description: Minimal weather example for Atelier.
 publish_to: none
+version: 0.0.1+1
 
 environment:
   sdk: ^3.11.5

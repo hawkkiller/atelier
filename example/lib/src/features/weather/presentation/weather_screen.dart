@@ -48,7 +48,10 @@ class _WeatherScreenState extends State<WeatherScreen> with AtelierVmMixin<Weath
         padding: const EdgeInsets.all(16),
         children: [
           if (weather != null) ...[
-            Text(weather.city, style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              weather.city,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             Text('${weather.temperature.round()}° · ${weather.description}'),
           ] else if (error == null)
             const Center(child: CircularProgressIndicator()),
@@ -82,7 +85,9 @@ class _CitySearchState extends State<CitySearch> with AtelierVmMixin<WeatherSear
   late final _query = own(TextEditingController());
 
   @override
-  WeatherSearchViewModel createViewModel(BuildContext context) => WeatherSearchViewModel(widget.repository);
+  WeatherSearchViewModel createViewModel(BuildContext context) {
+    return WeatherSearchViewModel(widget.repository);
+  }
 
   void _select(String city) {
     _query.clear();
