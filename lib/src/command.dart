@@ -59,7 +59,7 @@ final class CommandRunner<S extends Object> {
 
   final AtelierTaskExecutor<S> _executor;
   final TaskPolicy _policy;
-  final AtelierMutableState<bool> _isRunning = AtelierMutableState(false);
+  final MutableStateValue<bool> _isRunning = MutableStateValue(false);
   int _pending = 0;
 
   /// See [CommandHandle.isRunning].
@@ -87,7 +87,7 @@ final class CommandRunner<S extends Object> {
   void _setPending(int pending) {
     final wasRunning = _pending > 0;
     _pending = pending;
-    if (wasRunning != pending > 0) _isRunning.setValue(pending > 0);
+    if (wasRunning != pending > 0) _isRunning.value = pending > 0;
   }
 }
 

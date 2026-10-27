@@ -1,3 +1,11 @@
+## 0.2.0
+
+- Add `ViewModel.updateState` for synchronous state changes outside a task.
+- Add `ViewModel.follow`, which listens to a stream until disposal; a `StateValue`
+  source is applied synchronously first and its replay is skipped.
+- Export `MutableStateValue`, a writable `StateValue` for state owned outside a
+  ViewModel, such as application services.
+
 ## 0.1.0
 
 - **Breaking:** replace `textController()`, `focusNode()` and `scrollController()` with

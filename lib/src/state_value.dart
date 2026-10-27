@@ -4,17 +4,36 @@ import 'dart:async';
 ///
 /// Subscribing replays the current value. Notifications are asynchronous and
 /// ordered, the stream is broadcast, and equal values are emitted. Once the
-/// owning ViewModel is disposed, new subscriptions complete immediately
-/// without a replay, while [value] keeps returning the last state.
+/// owner closes it, as a ViewModel does when disposed, new subscriptions
+/// complete immediately without a replay, while [value] keeps returning the
+/// last state.
 abstract interface class StateValue<S> implements Stream<S> {
   /// The latest committed state, updated synchronously.
   S get value;
 }
 
-/// The [StateValue] implementation owned by a ViewModel. Not exported.
-final class AtelierMutableState<S> extends Stream<S> implements StateValue<S> {
+/// A [StateValue] its owner writes, for state that lives outside a ViewModel.
+///
+/// Keep it private and expose it as a read-only [StateValue], typically from
+/// an application service that several ViewModels follow:
+///
+/// ```dart
+/// final class SessionService {
+///   final _session = MutableStateValue<Session>(const Session.signedOut());
+///
+///   StateValue<Session> get session => _session;
+///
+///   void signIn(User user) => _session.value = Session.signedIn(user);
+///
+///   void dispose() => _session.close();
+/// }
+/// ```
+///
+/// ViewModels already own one: [ViewModel.state] is written through tasks or
+/// [ViewModel.updateState].
+final class MutableStateValue<S> extends Stream<S> implements StateValue<S> {
   /// Creates an open state holding [_value].
-  AtelierMutableState(this._value);
+  MutableStateValue(this._value);
   S _value;
   bool _isClosed = false;
   final Set<StreamController<S>> _listeners = {};
@@ -24,11 +43,11 @@ final class AtelierMutableState<S> extends Stream<S> implements StateValue<S> {
   @override
   S get value => _value;
 
-  /// Whether [close] has not been called yet.
-  bool get isOpen => !_isClosed;
+  /// Whether [close] has been called.
+  bool get isClosed => _isClosed;
 
   /// Publishes [next] to [value] and to every subscriber; ignored after close.
-  void setValue(S next) {
+  set value(S next) {
     if (_isClosed) return;
     _value = next;
     for (final listener in List<StreamController<S>>.of(_listeners)) {
