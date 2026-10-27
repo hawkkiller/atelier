@@ -43,6 +43,26 @@ void main() {
     });
   });
 
+  group('MutableStateValue', () {
+    test('publishes assignments to subscribers and ignores them after close', () async {
+      final value = MutableStateValue(0);
+      final events = <int>[];
+      final done = Completer<void>();
+      value.listen(events.add, onDone: done.complete);
+
+      value.value = 1;
+      expect(value.value, 1);
+      await Future<void>.delayed(Duration.zero);
+      expect(events, [0, 1]);
+
+      value.close();
+      value.value = 2;
+      await done.future;
+      expect((value.value, value.isClosed), (1, true));
+      expect(events, [0, 1]);
+    });
+  });
+
   group('Effects', () {
     test('delivers only to current listeners without replay', () async {
       final viewModel = _TestViewModel();
@@ -246,6 +266,59 @@ void main() {
         throwsStateError,
       );
       expect(disposing.state.value, 0);
+    });
+
+    test('updateState writes synchronously, rejects nesting, and no-ops after disposal', () {
+      final viewModel = _FollowViewModel(MutableStateValue(0));
+
+      viewModel.write(5);
+      expect(viewModel.state.value, 5);
+      expect(
+        () => viewModel.updateNested(),
+        throwsA(isA<StateError>()),
+      );
+      expect(viewModel.state.value, 5);
+
+      viewModel.dispose();
+      viewModel.write(9);
+      expect(viewModel.state.value, 5);
+    });
+
+    test('follow applies a StateValue synchronously, skips its replay, and stops on disposal', () async {
+      final source = MutableStateValue(1);
+      final viewModel = _FollowViewModel(source);
+      expect(viewModel.received, [1]);
+      expect(viewModel.state.value, 1);
+
+      await Future<void>.delayed(Duration.zero);
+      expect(viewModel.received, [1]);
+
+      source.value = 2;
+      await Future<void>.delayed(Duration.zero);
+      expect(viewModel.received, [1, 2]);
+      expect(viewModel.state.value, 2);
+
+      viewModel.dispose();
+      source.value = 3;
+      await Future<void>.delayed(Duration.zero);
+      expect(viewModel.received, [1, 2]);
+      expect(() => viewModel.followAgain(source), throwsStateError);
+    });
+
+    test('follow delivers every event of a plain stream', () async {
+      final controller = StreamController<int>();
+      final viewModel = _FollowViewModel(controller.stream);
+      expect(viewModel.received, isEmpty);
+
+      controller
+        ..add(4)
+        ..add(7);
+      await Future<void>.delayed(Duration.zero);
+      expect(viewModel.received, [4, 7]);
+      expect(viewModel.state.value, 7);
+
+      viewModel.dispose();
+      expect(controller.hasListener, isFalse);
     });
 
     test('onDispose can read state and emit effects', () async {
@@ -1150,4 +1223,24 @@ final class _CommandViewModel extends ViewModel<int> {
     task.ensureActive();
     appended.add(value);
   });
+}
+
+final class _FollowViewModel extends ViewModel<int> {
+  _FollowViewModel(Stream<int> source) : super(0) {
+    follow(source, (value) {
+      received.add(value);
+      updateState((_) => value);
+    });
+  }
+
+  final List<int> received = [];
+
+  void write(int value) => updateState((_) => value);
+
+  void updateNested() => updateState((state) {
+    updateState((_) => -1);
+    return state;
+  });
+
+  void followAgain(Stream<int> source) => follow(source, received.add);
 }

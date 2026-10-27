@@ -35,10 +35,11 @@ call `task.ensureActive()` immediately before the side effect.
 
 Each `ViewModel<S extends Object>` requires one initial aggregate state via
 `super(initialState)`. Its built-in `state` is a read-only `StateValue<S>`.
-Canonical mutations happen only inside a command or `execute` task, through
-`task.state = ...` or `task.updateState`: writes are synchronous, use the
-latest committed state, and emit equal values. Stale contexts silently no-op without evaluating their
-reducers. Reducers are pure and non-reentrant; nested updates, starting a task
+Asynchronous mutations happen inside a command or `execute` task, through
+`task.state = ...` or `task.updateState`; synchronous ones, such as input edits,
+use the protected `updateState` directly. Writes are synchronous, use the
+latest committed state, and emit equal values. Stale contexts and writes after
+disposal silently no-op without evaluating their reducers. Reducers are pure and non-reentrant; nested updates, starting a task
 on the owning ViewModel, or disposing it from a reducer throws `StateError`.
 Zones remain only for effect suppression: effects emitted by a cancelled task,
 including callbacks it registered, are dropped. Callbacks registered by a task
@@ -154,6 +155,27 @@ The default implementation rethrows.
 controllers, focus nodes, `ValueNotifier`s) with the owning `State`;
 `disposeWith(value, dispose)` handles everything else. ViewModels have their
 own `disposeWith` for subscriptions and timers, released after `onDispose()`.
+
+### Shared state
+
+State that outlives one screen, such as an application service's snapshot, can
+live in a `MutableStateValue`: its owner assigns `value` and exposes it as a
+read-only `StateValue`. A ViewModel follows it with `follow`, which applies the
+current value synchronously, so the first frame already reflects it, then
+every change until disposal:
+
+```dart
+final class LibraryViewModel extends ViewModel<LibraryState> {
+  LibraryViewModel(LibraryService library) : super(const LibraryState()) {
+    follow(library.snapshot, (snapshot) {
+      updateState((state) => state.copyWith(items: snapshot.items));
+    });
+  }
+}
+```
+
+`follow` accepts any `Stream`; only a `StateValue` gets the synchronous first
+value.
 
 Call `watch`/`watchSelect` only while building and `listen` only outside
 `build` (usually `initState`); debug builds assert both.

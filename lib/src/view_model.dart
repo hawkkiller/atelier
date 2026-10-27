@@ -9,9 +9,10 @@ import 'task.dart';
 
 /// Owns one aggregate state value, effects, and lifecycle-aware tasks.
 ///
-/// State is initialized by [initialState] and can only be changed from a task
-/// through [TaskContext.state] or [TaskContext.updateState]. Writes run
-/// synchronously and observe the latest committed value.
+/// State is initialized by [initialState] and changed from a task through
+/// [TaskContext.state] or [TaskContext.updateState], or outside a task with
+/// [updateState]. Writes run synchronously and observe the latest committed
+/// value.
 ///
 /// Public operations are usually declared as commands:
 ///
@@ -28,7 +29,7 @@ import 'task.dart';
 /// ```
 abstract class ViewModel<S extends Object> {
   /// Creates a ViewModel whose [state] starts at [initialState].
-  ViewModel(S initialState) : _state = AtelierMutableState(initialState) {
+  ViewModel(S initialState) : _state = MutableStateValue(initialState) {
     _executor = AtelierTaskExecutor<S>(
       updateState: _commit,
       readState: () => _state.value,
@@ -37,7 +38,7 @@ abstract class ViewModel<S extends Object> {
     );
   }
 
-  final AtelierMutableState<S> _state;
+  final MutableStateValue<S> _state;
   late final AtelierTaskExecutor<S> _executor;
   final List<void Function()> _ownedResources = [];
   bool _isDisposed = false;
@@ -115,6 +116,54 @@ abstract class ViewModel<S extends Object> {
     return value;
   }
 
+  /// Replaces the state with [reducer] applied to it, outside any task.
+  ///
+  /// Use it for synchronous changes such as input edits or values that
+  /// [follow] delivers; asynchronous work belongs in a task. Ignored after
+  /// disposal. Like task writes, it throws [StateError] from a reducer.
+  @protected
+  void updateState(S Function(S current) reducer) => _reduce(reducer, () => true);
+
+  /// Calls [onData] with every event of [source] until this ViewModel is
+  /// disposed, and returns the subscription.
+  ///
+  /// When [source] is a [StateValue], [onData] first runs synchronously with
+  /// its current value, so the ViewModel can apply it before its first frame,
+  /// and the replay that subscribing delivers is skipped:
+  ///
+  /// ```dart
+  /// LibraryViewModel(this.library) : super(const LibraryState()) {
+  ///   follow(library.snapshot, (snapshot) {
+  ///     updateState((state) => state.copyWith(items: snapshot.items));
+  ///   });
+  /// }
+  /// ```
+  ///
+  /// Throws [StateError] after disposal.
+  @protected
+  StreamSubscription<T> follow<T>(
+    Stream<T> source,
+    void Function(T value) onData, {
+    Function? onError,
+  }) {
+    _ensureNotDisposed();
+    final StreamSubscription<T> subscription;
+    if (source is StateValue<T>) {
+      var replayed = false;
+      subscription = source.listen((value) {
+        if (replayed) {
+          onData(value);
+        } else {
+          replayed = true;
+        }
+      }, onError: onError);
+      onData(source.value);
+    } else {
+      subscription = source.listen(onData, onError: onError);
+    }
+    return disposeWith(subscription, (subscription) => subscription.cancel());
+  }
+
   /// Called when a task fails with an error other than its own cancellation.
   ///
   /// [task] is still active unless it was cancelled, so an override can record
@@ -130,11 +179,13 @@ abstract class ViewModel<S extends Object> {
     if (_inReducer) throw StateError('Cannot start or cancel a task from a state reducer.');
   }
 
-  void _commit(TaskContext<S> context, S Function(S) reducer) {
+  void _commit(TaskContext<S> context, S Function(S) reducer) => _reduce(reducer, () => context.isActive);
+
+  void _reduce(S Function(S) reducer, bool Function() isActive) {
     if (_inReducer) {
       throw StateError('Nested state updates are not allowed from a reducer.');
     }
-    if (_isDisposed || !_state.isOpen || !context.isActive) return;
+    if (_isDisposed || _state.isClosed || !isActive()) return;
     _inReducer = true;
     S next;
     try {
@@ -142,7 +193,7 @@ abstract class ViewModel<S extends Object> {
     } finally {
       _inReducer = false;
     }
-    if (!_isDisposed && _state.isOpen && context.isActive) _state.setValue(next);
+    if (!_isDisposed && !_state.isClosed && isActive()) _state.value = next;
   }
 
   /// Cancels active and queued tasks, calls [onDispose], then closes state,
