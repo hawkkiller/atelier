@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:meta/meta.dart';
 
+import 'command.dart';
 import 'effects.dart';
 import 'state_value.dart';
 import 'task.dart';
@@ -9,12 +10,31 @@ import 'task.dart';
 /// Owns one aggregate state value, effects, and lifecycle-aware tasks.
 ///
 /// State is initialized by [initialState] and can only be changed from a task
-/// through [TaskContext.updateState]. Reducers run synchronously and observe
-/// the latest committed value.
+/// through [TaskContext.state] or [TaskContext.updateState]. Writes run
+/// synchronously and observe the latest committed value.
+///
+/// Public operations are usually declared as commands:
+///
+/// ```dart
+/// class SearchViewModel extends ViewModel<SearchState> {
+///   SearchViewModel(this._repository) : super(const SearchState());
+///
+///   final SearchRepository _repository;
+///
+///   late final search = restartable((String query, task) async {
+///     task.state = SearchState(results: await _repository.search(query));
+///   });
+/// }
+/// ```
 abstract class ViewModel<S extends Object> {
   /// Creates a ViewModel whose [state] starts at [initialState].
   ViewModel(S initialState) : _state = AtelierMutableState(initialState) {
-    _executor = AtelierTaskExecutor<S>(updateState: _commit, checkAllowed: _checkReducerGuard, onError: onTaskError);
+    _executor = AtelierTaskExecutor<S>(
+      updateState: _commit,
+      readState: () => _state.value,
+      checkAllowed: _checkReducerGuard,
+      onError: onTaskError,
+    );
   }
 
   final AtelierMutableState<S> _state;
@@ -31,6 +51,45 @@ abstract class ViewModel<S extends Object> {
 
   /// Whether [dispose] has been called.
   bool get isDisposed => _isDisposed;
+
+  /// Declares a command whose invocations run independently.
+  ///
+  /// ```dart
+  /// late final log = concurrent((String event, task) async { ... });
+  /// ```
+  @protected
+  CommandFactory<S> get concurrent => CommandFactory(_createCommandRunner(TaskPolicy.concurrent));
+
+  /// Declares a command whose invocations run one at a time, in call order.
+  @protected
+  CommandFactory<S> get sequential => CommandFactory(_createCommandRunner(TaskPolicy.sequential));
+
+  /// Declares a command that ignores calls while an invocation is running;
+  /// repeated calls share the running invocation's [Future].
+  @protected
+  CommandFactory<S> get droppable => CommandFactory(_createCommandRunner(TaskPolicy.droppable));
+
+  /// Declares a command where each call cancels the running invocation.
+  ///
+  /// ```dart
+  /// late final search = restartable((String query, task) async {
+  ///   task.state = SearchState(results: await repository.search(query));
+  /// });
+  /// ```
+  @protected
+  CommandFactory<S> get restartable => CommandFactory(_createCommandRunner(TaskPolicy.restartable));
+
+  CommandRunner<S> Function() _createCommandRunner(TaskPolicy policy) {
+    return () {
+      final runner = CommandRunner<S>(_executor, policy);
+      if (_isDisposed) {
+        runner.close();
+      } else {
+        _ownedResources.add(runner.close);
+      }
+      return runner;
+    };
+  }
 
   /// Creates an effect channel that is closed when this ViewModel is disposed.
   ///

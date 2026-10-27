@@ -1,5 +1,6 @@
 library;
 
+export 'src/command.dart' show Command, CommandFactory, CommandHandle, VoidCommand;
 export 'src/effects.dart' show Effects, EffectsDisposedError, MutableEffects;
 export 'src/flutter_bindings.dart';
 export 'src/state_value.dart' show StateValue;

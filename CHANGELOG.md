@@ -1,4 +1,4 @@
-## Unreleased
+## 0.1.0
 
 - **Breaking:** replace `textController()`, `focusNode()` and `scrollController()` with
   `own(notifier)`, which disposes any `ChangeNotifier`; `disposeWith` is now part of
@@ -15,6 +15,10 @@
 - Assert in debug builds when `watch` is called outside a build or `listen` from
   `build`.
 - Document the full public API and mark unimplemented proposal sections.
+- Add commands: declare `late final search = restartable((String query, task) async {...})`
+  (also `droppable`, `sequential`, `concurrent`, and `.noArgs`). Commands are callable,
+  are their own lane key, and expose `isRunning` and `cancel()`.
+- Add `TaskContext.state` getter and setter (`task.state = task.state.copyWith(...)`).
 
 ## 0.0.1
 

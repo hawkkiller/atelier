@@ -13,19 +13,19 @@ void main() {
     final repository = _ControlledRepository(searchResult: () => completer.future);
     final viewModel = WeatherSearchViewModel(repository);
     final future = viewModel.search(' War ');
-    expect(viewModel.state.value.searchStatus, WeatherSearchStatus.loading);
+    expect(viewModel.search.isRunning.value, isTrue);
     completer.complete(['Warsaw']);
     await future;
+    expect(viewModel.search.isRunning.value, isFalse);
     expect(viewModel.state.value.suggestions, ['Warsaw']);
     await viewModel.search(' ');
-    expect(viewModel.state.value.searchStatus, WeatherSearchStatus.idle);
-    expect(viewModel.state.value.suggestions, isEmpty);
+    expect(viewModel.state.value, const WeatherSearchState());
     repository.searchError = const WeatherNotFoundException();
     await viewModel.search('none');
-    expect(viewModel.state.value.searchStatus, WeatherSearchStatus.idle);
+    expect(viewModel.state.value, const WeatherSearchState());
     repository.searchError = const WeatherServiceException('raw');
     await viewModel.search('fail');
-    expect(viewModel.state.value.searchStatus, WeatherSearchStatus.failed);
+    expect(viewModel.state.value.failed, isTrue);
   });
 
   test('replacement cancels stale search and suppresses its result', () async {
