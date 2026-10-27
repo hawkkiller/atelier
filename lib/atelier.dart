@@ -3,6 +3,7 @@ library;
 export 'src/command.dart' show Command, CommandFactory, CommandHandle, VoidCommand;
 export 'src/effects.dart' show Effects, EffectsDisposedError, MutableEffects;
 export 'src/flutter_bindings.dart';
+export 'src/observer.dart';
 export 'src/state_value.dart' show MutableStateValue, StateValue;
 export 'src/task.dart' show CancellationToken, TaskCancelledException, TaskContext, TaskExecutor, TaskPolicy;
 export 'src/view_model.dart';

@@ -26,10 +26,13 @@ final class EffectsDisposedError extends StateError {
 
 /// The [MutableEffects] implementation created by `effectsOf`. Not exported.
 final class AtelierMutableEffects<E> extends Stream<E> implements MutableEffects<E> {
-  /// Creates an open effect channel.
-  AtelierMutableEffects() : _controller = StreamController<E>.broadcast();
+  /// Creates an open effect channel that reports delivered effects to [onEmit].
+  AtelierMutableEffects({void Function(E effect)? onEmit})
+    : _controller = StreamController<E>.broadcast(),
+      _onEmit = onEmit;
 
   final StreamController<E> _controller;
+  final void Function(E effect)? _onEmit;
   bool _isClosed = false;
 
   @override
@@ -44,6 +47,7 @@ final class AtelierMutableEffects<E> extends Stream<E> implements MutableEffects
       throw EffectsDisposedError();
     }
     _controller.add(effect);
+    _onEmit?.call(effect);
   }
 
   @override

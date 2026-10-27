@@ -43,6 +43,33 @@ void main() {
     });
   });
 
+  group('AtelierObserver', () {
+    tearDown(() => ViewModel.observer = null);
+
+    test('reports creation, state changes, effects, task errors, and disposal', () async {
+      final observer = _RecordingObserver();
+      ViewModel.observer = observer;
+      final viewModel = _LifecycleViewModel();
+
+      await viewModel.setValue(3);
+      viewModel.emit('done');
+      await expectLater(
+        viewModel.execute((task) async => throw StateError('failed')),
+        throwsStateError,
+      );
+      viewModel.dispose();
+
+      expect(observer.events, [
+        'create _LifecycleViewModel',
+        'state 0 -> 3',
+        'effect done',
+        'error Bad state: failed',
+        'dispose _LifecycleViewModel',
+        'effect during',
+      ]);
+    });
+  });
+
   group('MutableStateValue', () {
     test('publishes assignments to subscribers and ignores them after close', () async {
       final value = MutableStateValue(0);
@@ -1243,4 +1270,24 @@ final class _FollowViewModel extends ViewModel<int> {
   });
 
   void followAgain(Stream<int> source) => follow(source, received.add);
+}
+
+final class _RecordingObserver extends AtelierObserver {
+  final List<String> events = [];
+
+  @override
+  void onCreate(ViewModel<Object> viewModel) => events.add('create ${viewModel.runtimeType}');
+
+  @override
+  void onStateChanged(ViewModel<Object> viewModel, Object previous, Object next) =>
+      events.add('state $previous -> $next');
+
+  @override
+  void onEffect(ViewModel<Object> viewModel, Object? effect) => events.add('effect $effect');
+
+  @override
+  void onTaskError(ViewModel<Object> viewModel, Object error, StackTrace stackTrace) => events.add('error $error');
+
+  @override
+  void onDispose(ViewModel<Object> viewModel) => events.add('dispose ${viewModel.runtimeType}');
 }

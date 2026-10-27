@@ -4,6 +4,7 @@ import 'package:meta/meta.dart';
 
 import 'command.dart';
 import 'effects.dart';
+import 'observer.dart';
 import 'state_value.dart';
 import 'task.dart';
 
@@ -34,9 +35,18 @@ abstract class ViewModel<S extends Object> {
       updateState: _commit,
       readState: () => _state.value,
       checkAllowed: _checkReducerGuard,
-      onError: onTaskError,
+      onError: (task, error, stackTrace) {
+        observer?.onTaskError(this, error, stackTrace);
+        onTaskError(task, error, stackTrace);
+      },
     );
+    observer?.onCreate(this);
   }
+
+  /// Receives the lifecycle, state, effect, and task error events of every
+  /// ViewModel; see [AtelierObserver]. Read at each event, so replacing it
+  /// applies to existing ViewModels too.
+  static AtelierObserver? observer;
 
   final MutableStateValue<S> _state;
   late final AtelierTaskExecutor<S> _executor;
@@ -98,7 +108,9 @@ abstract class ViewModel<S extends Object> {
   @protected
   MutableEffects<E> effectsOf<E>() {
     _ensureNotDisposed();
-    final effects = AtelierMutableEffects<E>();
+    final effects = AtelierMutableEffects<E>(
+      onEmit: (effect) => observer?.onEffect(this, effect),
+    );
     _ownedResources.add(effects.close);
     return effects;
   }
@@ -193,7 +205,10 @@ abstract class ViewModel<S extends Object> {
     } finally {
       _inReducer = false;
     }
-    if (!_isDisposed && !_state.isClosed && isActive()) _state.value = next;
+    if (_isDisposed || _state.isClosed || !isActive()) return;
+    final previous = _state.value;
+    _state.value = next;
+    observer?.onStateChanged(this, previous, next);
   }
 
   /// Cancels active and queued tasks, calls [onDispose], then closes state,
@@ -206,6 +221,7 @@ abstract class ViewModel<S extends Object> {
     if (_isDisposed) return;
     if (_inReducer) throw StateError('Cannot dispose a ViewModel from a state reducer.');
     _isDisposed = true;
+    observer?.onDispose(this);
     _executor.dispose();
     Object? error;
     StackTrace? stackTrace;

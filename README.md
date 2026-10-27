@@ -177,6 +177,23 @@ final class LibraryViewModel extends ViewModel<LibraryState> {
 `follow` accepts any `Stream`; only a `StateValue` gets the synchronous first
 value.
 
+### Observing
+
+Set `ViewModel.observer` once, usually at startup, to see every ViewModel's
+creation, state changes, effects, task errors, and disposal, for example to log
+them. Each `AtelierObserver` hook does nothing by default:
+
+```dart
+final class LoggingObserver extends AtelierObserver {
+  @override
+  void onTaskError(ViewModel<Object> viewModel, Object error, StackTrace stackTrace) {
+    log('${viewModel.runtimeType} failed', error: error, stackTrace: stackTrace);
+  }
+}
+
+ViewModel.observer = LoggingObserver();
+```
+
 Call `watch`/`watchSelect` only while building and `listen` only outside
 `build` (usually `initState`); debug builds assert both.
 

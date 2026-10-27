@@ -1,3 +1,8 @@
+## 0.2.1
+
+- Add `AtelierObserver` and `ViewModel.observer` to observe every ViewModel's
+  creation, state changes, delivered effects, task errors, and disposal.
+
 ## 0.2.0
 
 - Add `ViewModel.updateState` for synchronous state changes outside a task.
