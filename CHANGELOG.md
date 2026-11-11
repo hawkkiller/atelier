@@ -1,3 +1,14 @@
+## 0.3.0
+
+- Add `ViewModel.derive`, which runs on the initial state and on the result of
+  every write, so computed state fields are set in one place.
+- Add the `ViewModelEffects<S, E>` mixin: one `effects` channel and a protected
+  `emit`, without declaring a `MutableEffects` field and a getter.
+- Add `TaskContext.delay`, a wait that stops when the task is cancelled, for
+  debouncing a restartable task.
+- **Breaking:** `TaskContext` has a new member, so classes that implement it
+  must add `delay`.
+
 ## 0.2.1
 
 - Add `AtelierObserver` and `ViewModel.observer` to observe every ViewModel's

@@ -40,6 +40,7 @@ abstract class ViewModel<S extends Object> {
         onTaskError(task, error, stackTrace);
       },
     );
+    _state.value = _derived(initialState);
     observer?.onCreate(this);
   }
 
@@ -108,11 +109,47 @@ abstract class ViewModel<S extends Object> {
   @protected
   MutableEffects<E> effectsOf<E>() {
     _ensureNotDisposed();
+    return _createEffects<E>();
+  }
+
+  AtelierMutableEffects<E> _createEffects<E>() {
     final effects = AtelierMutableEffects<E>(
       onEmit: (effect) => observer?.onEffect(this, effect),
     );
-    _ownedResources.add(effects.close);
+    if (_isDisposed) {
+      effects.close();
+    } else {
+      _ownedResources.add(effects.close);
+    }
     return effects;
+  }
+
+  /// Returns [state] with its computed fields brought up to date.
+  ///
+  /// Runs on the initial state and on the result of every write, from
+  /// [updateState] and from tasks, so derived values such as `canSave` are
+  /// set in one place and cannot go stale:
+  ///
+  /// ```dart
+  /// @override
+  /// FormState derive(FormState state) =>
+  ///     state.copyWith(canSave: state.name.isNotEmpty && !state.saving);
+  /// ```
+  ///
+  /// It is a reducer: keep it synchronous and pure, and never start tasks,
+  /// update state, or dispose from it. The first call happens inside this
+  /// class's constructor, before the subclass constructor body runs, so it
+  /// can read fields set by initializers but not ones the body assigns.
+  @protected
+  S derive(S state) => state;
+
+  S _derived(S state) {
+    _inReducer = true;
+    try {
+      return derive(state);
+    } finally {
+      _inReducer = false;
+    }
   }
 
   /// Registers [value] to be released with [dispose] when this ViewModel is
@@ -201,7 +238,7 @@ abstract class ViewModel<S extends Object> {
     _inReducer = true;
     S next;
     try {
-      next = reducer(_state.value);
+      next = derive(reducer(_state.value));
     } finally {
       _inReducer = false;
     }
@@ -253,4 +290,33 @@ abstract class ViewModel<S extends Object> {
   void _ensureNotDisposed() {
     if (_isDisposed) throw StateError('The ViewModel has been disposed.');
   }
+}
+
+/// Gives a ViewModel one effect channel of type [E], closed on disposal.
+///
+/// ```dart
+/// class SaveViewModel extends ViewModel<SaveState>
+///     with ViewModelEffects<SaveState, SaveEffect> {
+///   SaveViewModel() : super(const SaveState());
+///
+///   late final save = droppable.noArgs((task) async {
+///     await repository.save(task.state.draft);
+///     emit(SaveEffect.saved);
+///   });
+/// }
+/// ```
+///
+/// Use [ViewModel.effectsOf] instead when a ViewModel needs several channels.
+mixin ViewModelEffects<S extends Object, E> on ViewModel<S> {
+  late final AtelierMutableEffects<E> _effects = _createEffects<E>();
+
+  /// One-shot outcomes for the view to present, such as navigation or a message.
+  Effects<E> get effects => _effects;
+
+  /// Delivers [effect] to current listeners of [effects].
+  ///
+  /// Follows [MutableEffects.emit]: dropped silently from a cancelled task,
+  /// and throws [EffectsDisposedError] after disposal from outside a task.
+  @protected
+  void emit(E effect) => _effects.emit(effect);
 }

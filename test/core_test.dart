@@ -127,6 +127,23 @@ void main() {
         throwsA(isA<EffectsDisposedError>()),
       );
     });
+
+    test('ViewModelEffects provides one channel that closes with the ViewModel', () async {
+      final viewModel = _EffectsViewModel();
+      final received = <String>[];
+      final done = Completer<void>();
+      viewModel.effects.listen(received.add, onDone: done.complete);
+
+      viewModel.send('saved');
+      viewModel.dispose();
+
+      await done.future;
+      expect(received, ['saved']);
+      expect(() => viewModel.send('late'), throwsA(isA<EffectsDisposedError>()));
+
+      final unused = _EffectsViewModel()..dispose();
+      expect(() => unused.send('late'), throwsA(isA<EffectsDisposedError>()));
+    });
   });
 
   group('ViewModel', () {
@@ -309,6 +326,20 @@ void main() {
       viewModel.dispose();
       viewModel.write(9);
       expect(viewModel.state.value, 5);
+    });
+
+    test('derive runs on the initial state and every write, and rejects nested updates', () async {
+      final viewModel = _DerivedViewModel(2);
+      expect(viewModel.state.value, (value: 1, doubled: 2));
+
+      viewModel.write(3);
+      expect(viewModel.state.value, (value: 3, doubled: 6));
+      await viewModel.writeFromTask(4);
+      expect(viewModel.state.value, (value: 4, doubled: 8));
+
+      viewModel.nest = true;
+      expect(() => viewModel.write(5), throwsA(isA<StateError>()));
+      expect(viewModel.state.value, (value: 4, doubled: 8));
     });
 
     test('follow applies a StateValue synchronously, skips its replay, and stops on disposal', () async {
@@ -1028,6 +1059,27 @@ void main() {
       await first;
       expect(callbackCount, 0);
     });
+
+    test('delay waits for the duration and stops as soon as the task is cancelled', () async {
+      final viewModel = _TestViewModel();
+      final ran = <String>[];
+      Future<void> debounced(String value) => viewModel.execute.restartable(key: 'debounce', (task) async {
+        await task.delay(const Duration(milliseconds: 20));
+        ran.add(value);
+      });
+
+      final superseded = debounced('a');
+      final latest = debounced('b');
+      await superseded;
+      expect(ran, isEmpty);
+      await latest;
+      expect(ran, ['b']);
+
+      final disposed = debounced('c');
+      viewModel.dispose();
+      await disposed;
+      expect(ran, ['b']);
+    });
   });
   group('Command', () {
     test('task.state reads the latest state and assignment writes it', () async {
@@ -1159,6 +1211,31 @@ final class _TestViewModel extends ViewModel<int> {
   void onDispose() {
     disposeCount++;
   }
+}
+
+final class _EffectsViewModel extends ViewModel<int> with ViewModelEffects<int, String> {
+  _EffectsViewModel() : super(0);
+
+  void send(String effect) => emit(effect);
+}
+
+typedef _Doubled = ({int value, int doubled});
+
+final class _DerivedViewModel extends ViewModel<_Doubled> {
+  _DerivedViewModel(this.factor) : super((value: 1, doubled: 0));
+
+  final int factor;
+  bool nest = false;
+
+  @override
+  _Doubled derive(_Doubled state) {
+    if (nest) updateState((state) => state);
+    return (value: state.value, doubled: state.value * factor);
+  }
+
+  void write(int value) => updateState((_) => (value: value, doubled: 0));
+
+  Future<void> writeFromTask(int value) => execute((task) async => task.state = (value: value, doubled: 0));
 }
 
 final class _LifecycleViewModel extends ViewModel<int> {

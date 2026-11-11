@@ -54,13 +54,11 @@ Dependency injection is not part of the current implementation.
 ## Usage
 
 ```dart
-class SearchViewModel extends ViewModel<SearchState> {
+class SearchViewModel extends ViewModel<SearchState>
+    with ViewModelEffects<SearchState, SearchEffect> {
   SearchViewModel(this.repository) : super(SearchState.initial());
 
   final SearchRepository repository;
-  late final MutableEffects<SearchEffect> _effects = effectsOf();
-
-  Effects<SearchEffect> get effects => _effects;
 
   late final search = restartable((String query, task) async {
     final results = await repository.search(query, cancellationToken: task);
@@ -132,6 +130,41 @@ SearchViewModel createViewModel(BuildContext context) {
 Do not call `dependOnInheritedWidgetOfExactType` (or another listening lookup)
 from `createViewModel()`.
 
+### Effects
+
+`ViewModelEffects<S, E>` gives a ViewModel one `effects` channel for one-shot
+outcomes such as navigation or a message, and a protected `emit(effect)`.
+Effects are not replayed, and emits from a cancelled task are dropped. A
+ViewModel that needs several channels declares them with `effectsOf` instead.
+
+### Derived state
+
+Override `derive` to compute fields from the rest of the state. It runs on the
+initial state and on the result of every write, so no update can leave a
+computed field stale:
+
+```dart
+@override
+FormState derive(FormState state) =>
+    state.copyWith(canSave: state.name.isNotEmpty && !state.saving);
+```
+
+`derive` is a reducer: keep it synchronous and pure. Its first call happens
+before the subclass constructor body runs, so it can read fields set by
+initializers but not ones the body assigns.
+
+### Debouncing
+
+`task.delay(duration)` waits inside a task and throws the task's cancellation
+as soon as it is cancelled, so a restartable command debounces in one line:
+
+```dart
+late final search = restartable((String query, task) async {
+  await task.delay(const Duration(milliseconds: 300));
+  task.state = task.state.copyWith(results: await repository.search(query));
+});
+```
+
 ### Errors
 
 Errors other than a task's own cancellation propagate through the command's
@@ -142,7 +175,7 @@ turn unexpected failures into state or effects instead of uncaught errors:
 @override
 void onTaskError(TaskContext<SearchState> task, Object error, StackTrace stackTrace) {
   task.updateState((state) => state.copyWith(loading: false, failed: true));
-  _effects.emit(SearchEffect.failed);
+  emit(SearchEffect.failed);
 }
 ```
 

@@ -53,12 +53,11 @@ Each command is its own key. Several arguments go in a record.
 ViewModel with state, effects and error handling:
 
 ```dart
-class SearchViewModel extends ViewModel<SearchState> {
+class SearchViewModel extends ViewModel<SearchState>
+    with ViewModelEffects<SearchState, SearchEffect> {
   SearchViewModel(this._repository) : super(const SearchState());
 
   final SearchRepository _repository;
-  late final MutableEffects<SearchEffect> _effects = effectsOf();
-  Effects<SearchEffect> get effects => _effects;
 
   late final search = restartable((String query, task) async {
     final results = await _repository.search(query, cancellationToken: task);
@@ -67,10 +66,14 @@ class SearchViewModel extends ViewModel<SearchState> {
 
   @override
   void onTaskError(TaskContext<SearchState> task, Object error, StackTrace stackTrace) {
-    _effects.emit(SearchEffect.failed);
+    emit(SearchEffect.failed);
   }
 }
 ```
+
+Computed state fields: override `derive(state)`; it runs on the initial state
+and after every write, so call sites use plain `copyWith`. Debounce a
+restartable command with `await task.delay(duration)`.
 
 ViewModel-owned subscription: `disposeWith(stream.listen(...), (s) => s.cancel())`.
 

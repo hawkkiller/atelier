@@ -6,14 +6,10 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 
 part 'weather_view_model.freezed.dart';
 
-class WeatherViewModel extends ViewModel<WeatherState> {
+class WeatherViewModel extends ViewModel<WeatherState> with ViewModelEffects<WeatherState, WeatherEffect> {
   WeatherViewModel(this._repository) : super(const WeatherState());
 
   final WeatherRepository _repository;
-  late final MutableEffects<WeatherEffect> _effects = effectsOf();
-
-  /// One-shot outcomes the screen presents, such as a snackbar.
-  Effects<WeatherEffect> get effects => _effects;
 
   late final load = restartable((String city, task) async {
     final q = city.trim();
@@ -38,7 +34,7 @@ class WeatherViewModel extends ViewModel<WeatherState> {
   @override
   void onTaskError(TaskContext<WeatherState> task, Object error, StackTrace stackTrace) {
     task.state = task.state.copyWith(loadStatus: .serviceUnavailable);
-    _effects.emit(.unexpectedFailure);
+    emit(.unexpectedFailure);
   }
 }
 

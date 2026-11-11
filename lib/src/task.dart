@@ -49,6 +49,22 @@ abstract interface class TaskContext<S extends Object> implements CancellationTo
   /// navigation, platform calls) that must not run for a stale task.
   void ensureActive();
 
+  /// Waits for [duration], or throws the task's [TaskCancelledException] as
+  /// soon as it is cancelled.
+  ///
+  /// The timer stops with the task, so a restartable task debounces with one
+  /// line and nothing after the wait runs for a superseded call:
+  ///
+  /// ```dart
+  /// late final search = restartable((String query, task) async {
+  ///   await task.delay(const Duration(milliseconds: 300));
+  ///   task.state = task.state.copyWith(results: await repository.search(query));
+  /// });
+  /// ```
+  ///
+  /// Throws like [ensureActive] when the task is already cancelled or finished.
+  Future<void> delay(Duration duration);
+
   /// The latest committed state of the owning ViewModel.
   S get state;
 
@@ -450,6 +466,21 @@ final class _TaskContext<S extends Object> implements TaskContext<S>, AtelierTas
     if (_isFinished) {
       throw StateError('The task is no longer active.');
     }
+  }
+
+  @override
+  Future<void> delay(Duration duration) {
+    ensureActive();
+    final completer = Completer<void>();
+    final timer = Timer(duration, completer.complete);
+    unawaited(
+      cancelled.then((_) {
+        if (completer.isCompleted) return;
+        timer.cancel();
+        completer.completeError(cancellationException, StackTrace.current);
+      }),
+    );
+    return completer.future;
   }
 
   @override
